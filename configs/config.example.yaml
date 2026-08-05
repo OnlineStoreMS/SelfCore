@@ -18,10 +18,12 @@ integrations:
   ordercore_api_url: "http://127.0.0.1:8098"
 
 storage:
-  driver: local                  # local | minio（部署用 minio）
+  # local：public_base_url 用 API 自身，如 http://127.0.0.1:8103/uploads
+  # minio：public_base_url 用 bucket 公网前缀，如 http://192.168.3.41:9100/selfcore
+  driver: minio                  # local | minio（部署用 minio）
   prefix: "uploads"
   local_path: "./data/uploads"
-  public_base_url: "http://127.0.0.1:8103/uploads"
+  public_base_url: "http://192.168.3.41:9100/selfcore"
   minio:
     endpoint: "127.0.0.1:9100"
     access_key: "minioadmin"
