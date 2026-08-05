@@ -1,0 +1,39 @@
+server:
+  port: 8103
+  mode: debug
+
+database:
+  driver: postgres
+  # 本地开发建议 host=127.0.0.1；部署由 deploy/scripts/sync-configs.sh 写入
+  # 本地 smoke 可改为 driver: sqlite + sqlite_path: "./data/selfcore.db"
+  postgres_dsn: "host=127.0.0.1 user=selfcore password=selfcore dbname=selfcore port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+  sqlite_path: "./data/selfcore.db"
+
+auth:
+  enabled: true
+  jwt_secret: "change-me-in-production-use-long-random-string"
+
+integrations:
+  productcore_api_url: "http://127.0.0.1:8090"
+  ordercore_api_url: "http://127.0.0.1:8098"
+
+storage:
+  driver: local                  # local | minio（部署用 minio）
+  prefix: "uploads"
+  local_path: "./data/uploads"
+  public_base_url: "http://127.0.0.1:8103/uploads"
+  minio:
+    endpoint: "127.0.0.1:9100"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
+    bucket: "selfcore"
+    use_ssl: false
+    prefix: "uploads"
+    public_read: true
+
+cors:
+  allow_origins:
+    - "http://localhost:5187"
+    - "http://127.0.0.1:5187"
+    - "http://localhost:5174"
+    - "http://127.0.0.1:5174"
