@@ -149,6 +149,9 @@ func (c *Client) getJSON(ctx context.Context, bearerToken, path string, out any)
 		return err
 	}
 	if bearerToken != "" {
+		if !strings.HasPrefix(bearerToken, "Bearer ") {
+			bearerToken = "Bearer " + bearerToken
+		}
 		req.Header.Set("Authorization", bearerToken)
 	}
 	resp, err := c.httpClient.Do(req)

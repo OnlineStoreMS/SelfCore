@@ -44,7 +44,10 @@ func (s *DashboardService) Stats() (*dto.DashboardStats, error) {
 	out := &dto.DashboardStats{}
 
 	var err error
-	// 工作场景默认按今日业务日（COALESCE(ordered_at, created_at)）统计
+	// 工作场景默认按今日业务日统计
+	if out.Workbench.SelfOrderPO, err = r.CountSelfOrdersSince(&today, true); err != nil {
+		return nil, err
+	}
 	if out.Workbench.DropshipPO, err = r.CountPOsByFulfillmentSince(model.DistFulfillmentDropship, true, &today); err != nil {
 		return nil, err
 	}
@@ -69,13 +72,41 @@ func (s *DashboardService) Stats() (*dto.DashboardStats, error) {
 	if out.Workbench.ActiveOffers, err = r.CountOffers(true); err != nil {
 		return nil, err
 	}
-	saleAmt, purchaseAmt, err := r.SumDropshipSaleAndPurchaseOnDay(today)
+	if out.Workbench.TodayDistSaleAmount, err = r.SumDistSaleAmountOnDay(today); err != nil {
+		return nil, err
+	}
+	if out.Workbench.TodaySelfSaleAmount, err = r.SumSelfSaleAmountOnDay(today); err != nil {
+		return nil, err
+	}
+	if out.Workbench.WeekSelfSaleAmount, err = r.SumSelfSaleAmountSince(week); err != nil {
+		return nil, err
+	}
+	if out.Workbench.MonthSelfSaleAmount, err = r.SumSelfSaleAmountSince(month); err != nil {
+		return nil, err
+	}
+	if out.Workbench.MonthDistSaleAmount, err = r.SumDistSaleAmountSince(month); err != nil {
+		return nil, err
+	}
+	distCostToday, err := r.SumDistCostAmountOnDay(today)
 	if err != nil {
 		return nil, err
 	}
-	out.Workbench.TodayDropshipSaleAmount = saleAmt
-	out.Workbench.TodayDropshipWholesaleAmount = purchaseAmt
-	out.Workbench.TodayDropshipProfit = saleAmt - purchaseAmt
+	selfCostToday, err := r.SumSelfCostAmountOnDay(today)
+	if err != nil {
+		return nil, err
+	}
+	// 毛利润仅统计成本额 > 0 的订单；销售额卡片仍含成本为 0 的单
+	selfSaleForProfit, selfCostForProfit, err := r.SumSelfSaleAndCostWithCostOnDay(today)
+	if err != nil {
+		return nil, err
+	}
+	distSaleForProfit, distCostForProfit, err := r.SumDistSaleAndCostWithCostOnDay(today)
+	if err != nil {
+		return nil, err
+	}
+	out.Workbench.TodayDropshipSaleAmount = selfSaleForProfit + distSaleForProfit
+	out.Workbench.TodayDropshipWholesaleAmount = selfCostForProfit + distCostForProfit
+	out.Workbench.TodayDropshipProfit = out.Workbench.TodayDropshipSaleAmount - out.Workbench.TodayDropshipWholesaleAmount
 
 	if out.Distributor.Total, err = r.CountDistributors(false); err != nil {
 		return nil, err
@@ -115,17 +146,30 @@ func (s *DashboardService) Stats() (*dto.DashboardStats, error) {
 		return nil, err
 	}
 
-	if out.Cost.TodayAmount, err = r.SumPOAmountSince(today); err != nil {
-		return nil, err
-	}
+	out.Cost.TodayAmount = selfCostToday + distCostToday
 	if out.Cost.WeekAmount, err = r.SumPOAmountSince(week); err != nil {
 		return nil, err
+	}
+	if selfCostWeek, err2 := r.SumSelfCostAmountSince(week); err2 != nil {
+		return nil, err2
+	} else {
+		out.Cost.WeekAmount += selfCostWeek
 	}
 	if out.Cost.MonthAmount, err = r.SumPOAmountSince(month); err != nil {
 		return nil, err
 	}
+	if selfCostMonth, err2 := r.SumSelfCostAmountSince(month); err2 != nil {
+		return nil, err2
+	} else {
+		out.Cost.MonthAmount += selfCostMonth
+	}
 	if out.Cost.YearAmount, err = r.SumPOAmountSince(year); err != nil {
 		return nil, err
+	}
+	if selfCostYear, err2 := r.SumSelfCostAmountSince(year); err2 != nil {
+		return nil, err2
+	} else {
+		out.Cost.YearAmount += selfCostYear
 	}
 	if out.Cost.UnpaidAmount, err = r.SumUnpaidAmount(); err != nil {
 		return nil, err
@@ -211,7 +255,7 @@ func (s *DashboardService) Trend(startDate, endDate string) (*dto.DashboardTrend
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrBadRequest, err)
 	}
-	points, err := r.DailyDropshipTrend(start, end)
+	points, err := r.DailyAllTypesTrend(start, end)
 	if err != nil {
 		return nil, err
 	}

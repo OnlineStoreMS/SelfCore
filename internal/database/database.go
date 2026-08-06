@@ -51,6 +51,11 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.DistShipmentItem{},
 		&model.DistReceipt{},
 		&model.DistAttachment{},
+		&model.SelfOrder{},
+		&model.SelfOrderItem{},
+		&model.SelfShipment{},
+		&model.SelfShipmentItem{},
+		&model.SelfAttachment{},
 	); err != nil {
 		return err
 	}
@@ -72,6 +77,9 @@ func ensureIndexes(db *gorm.DB) error {
 			CREATE UNIQUE INDEX IF NOT EXISTS idx_shipment_tenant_no ON dist_shipments (tenant_id, shipment_no);
 			CREATE INDEX IF NOT EXISTS idx_do_ref_so ON dist_orders (tenant_id, ref_so_id);
 			CREATE INDEX IF NOT EXISTS idx_do_ref_trace ON dist_orders (tenant_id, ref_trace_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_self_orders_tenant_no ON self_orders (tenant_id, so_no);
+			CREATE INDEX IF NOT EXISTS idx_self_orders_ref_so ON self_orders (tenant_id, ref_so_id);
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_self_shipments_tenant_no ON self_shipments (tenant_id, shipment_no);
 		`).Error
 	default:
 		return nil

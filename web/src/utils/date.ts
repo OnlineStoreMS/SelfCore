@@ -46,6 +46,12 @@ export function rangeFromQueryDates(startRaw?: unknown, endRaw?: unknown): [stri
 }
 
 /** 与订单中心订单列表一致的快捷选项 */
+/** 自定义选日期时默认起止时刻（el-date-picker datetimerange 的 default-time） */
+export const dateRangeDefaultTime: [Date, Date] = [
+  new Date(2000, 0, 1, 0, 0, 0),
+  new Date(2000, 0, 1, 23, 59, 59),
+]
+
 export const dateShortcuts = [
   {
     text: '今天',

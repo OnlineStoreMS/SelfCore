@@ -60,30 +60,59 @@ type OrderShipmentBrief struct {
 }
 
 type OrderBrief struct {
-	ID              uint64               `json:"id"`
-	OrderNo         string               `json:"orderNo"`
-	SourceChannel   string               `json:"sourceChannel"`
-	Platform        string               `json:"platform"`
-	PlatformOrderID string               `json:"platformOrderId"`
-	PlatformSysTid  string               `json:"platformSysTid"`
-	ShopName        string               `json:"shopName"`
-	BuyerName       string               `json:"buyerName"`
-	BuyerNick       string               `json:"buyerNick"`
-	BuyerPhone      string               `json:"buyerPhone"`
-	Status          string               `json:"status"`
-	ShipStatus      string               `json:"shipStatus"`
-	TotalAmount     float64              `json:"totalAmount"`
-	PayAmount       float64              `json:"payAmount"`
-	Remark          string               `json:"remark"`
-	SellerRemark    string               `json:"sellerRemark"`
-	FenFaRemark     string               `json:"fenFaRemark"`
-	PrinterRemark   string               `json:"printerRemark"`
-	AllocRemark     string               `json:"allocRemark"`
-	OrderedAt       *string              `json:"orderedAt,omitempty"`
-	CreatedAt       string               `json:"createdAt"`
-	Address         *OrderAddressBrief   `json:"address,omitempty"`
-	Shipments       []OrderShipmentBrief `json:"shipments,omitempty"`
-	Items           []OrderItemBrief     `json:"items,omitempty"`
+	ID                   uint64               `json:"id"`
+	OrderNo              string               `json:"orderNo"`
+	SourceChannel        string               `json:"sourceChannel"`
+	Platform             string               `json:"platform"`
+	PlatformOrderID      string               `json:"platformOrderId"`
+	PlatformSysTid       string               `json:"platformSysTid"`
+	ShopName             string               `json:"shopName"`
+	BuyerName            string               `json:"buyerName"`
+	BuyerNick            string               `json:"buyerNick"`
+	BuyerPhone           string               `json:"buyerPhone"`
+	Status               string               `json:"status"`
+	ShipStatus           string               `json:"shipStatus"`
+	AllocType            string               `json:"allocType"`
+	TotalAmount          float64              `json:"totalAmount"`
+	PayAmount            float64              `json:"payAmount"`
+	Remark               string               `json:"remark"`
+	SellerRemark         string               `json:"sellerRemark"`
+	FenFaRemark          string               `json:"fenFaRemark"`
+	PrinterRemark        string               `json:"printerRemark"`
+	AllocRemark          string               `json:"allocRemark"`
+	PlatformStatus       string               `json:"platformStatus"`
+	PlatformStatusText   string               `json:"platformStatusText"`
+	EcommerceStatus      string               `json:"ecommerceStatus"`
+	EcommerceStatusText  string               `json:"ecommerceStatusText"`
+	AfterSaleStatus      string               `json:"afterSaleStatus"`
+	AfterSaleStatusText  string               `json:"afterSaleStatusText"`
+	AgentType            int                  `json:"agentType"`
+	PayTime              *string              `json:"payTime,omitempty"`
+	OrderedAt            *string              `json:"orderedAt,omitempty"`
+	ShippedAt            *string              `json:"shippedAt,omitempty"`
+	CreatedAt            string               `json:"createdAt"`
+	Address              *OrderAddressBrief   `json:"address,omitempty"`
+	Shipments            []OrderShipmentBrief `json:"shipments,omitempty"`
+	Items                []OrderItemBrief     `json:"items,omitempty"`
+}
+
+// OrderListQuery mirrors OrderCore admin list filters.
+type OrderListQuery struct {
+	SourceChannel string
+	Status        string
+	ShipStatus    string
+	AllocType     string
+	Keyword       string
+	Platform      string
+	SalesChannel  string
+	OrderedAtStart string
+	OrderedAtEnd   string
+	ShippedAtStart string
+	ShippedAtEnd   string
+	PayTimeStart   string
+	PayTimeEnd     string
+	Page           int
+	PageSize       int
 }
 
 // FormatReceiverAddress 拼接收件地址展示文案。
@@ -117,29 +146,52 @@ type apiBody struct {
 	Data    json.RawMessage `json:"data"`
 }
 
-func (c *Client) SearchOrders(ctx context.Context, bearerToken, keyword string, page, pageSize int) ([]OrderBrief, int64, error) {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
-		return nil, 0, fmt.Errorf("keyword required")
+func (c *Client) ListOrders(ctx context.Context, bearerToken string, q OrderListQuery) ([]OrderBrief, int64, error) {
+	if q.Page <= 0 {
+		q.Page = 1
 	}
-	if page <= 0 {
-		page = 1
+	if q.PageSize <= 0 {
+		q.PageSize = 20
 	}
-	if pageSize <= 0 {
-		pageSize = 20
+	vals := url.Values{}
+	vals.Set("page", strconv.Itoa(q.Page))
+	vals.Set("pageSize", strconv.Itoa(q.PageSize))
+	set := func(k, v string) {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			vals.Set(k, v)
+		}
 	}
-	q := url.Values{}
-	q.Set("keyword", keyword)
-	q.Set("page", strconv.Itoa(page))
-	q.Set("pageSize", strconv.Itoa(pageSize))
+	set("sourceChannel", q.SourceChannel)
+	set("status", q.Status)
+	set("shipStatus", q.ShipStatus)
+	set("allocType", q.AllocType)
+	set("keyword", q.Keyword)
+	set("platform", q.Platform)
+	set("salesChannel", q.SalesChannel)
+	set("orderedAtStart", q.OrderedAtStart)
+	set("orderedAtEnd", q.OrderedAtEnd)
+	set("shippedAtStart", q.ShippedAtStart)
+	set("shippedAtEnd", q.ShippedAtEnd)
+	set("payTimeStart", q.PayTimeStart)
+	set("payTimeEnd", q.PayTimeEnd)
+
 	var pageData pagePayload[OrderBrief]
-	if err := c.getJSON(ctx, bearerToken, "/api/v1/admin/orders?"+q.Encode(), &pageData); err != nil {
+	if err := c.getJSON(ctx, bearerToken, "/api/v1/admin/orders?"+vals.Encode(), &pageData); err != nil {
 		return nil, 0, err
 	}
 	if pageData.List == nil {
 		pageData.List = []OrderBrief{}
 	}
 	return pageData.List, pageData.Total, nil
+}
+
+func (c *Client) SearchOrders(ctx context.Context, bearerToken, keyword string, page, pageSize int) ([]OrderBrief, int64, error) {
+	return c.ListOrders(ctx, bearerToken, OrderListQuery{
+		Keyword:  keyword,
+		Page:     page,
+		PageSize: pageSize,
+	})
 }
 
 func (c *Client) GetOrder(ctx context.Context, bearerToken string, id uint64) (*OrderBrief, error) {

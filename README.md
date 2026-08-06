@@ -26,8 +26,10 @@
 - 状态流转：提交 → 标记已付 → 完成 / 取消
 - 发货单、收款记录、附件上传（含移动端扫码传图）
 
-### 自营订单（OrderCore 代理）
-- 订单搜索、详情、解密、发货（`/orders/*`）
+### 自营订单（本地单据）
+- 订单中心 `self_ship` 分配时自动建单；列表/详情在本中心
+- 明细绑定仓储 SKU 与成本；发货回传订单中心后扣库
+- API：`/self-orders*`、`/warehouse-skus/search`
 
 ### 工作台
 - Dashboard 统计与趋势
@@ -81,7 +83,7 @@ database:
 | 工作台 | `GET /dashboard/stats`、`/dashboard/trend` |
 | 自营订单 | `GET /orders/search`、`GET /orders/:id`、`POST /orders/decrypt`、`POST /orders/:id/ship` |
 | 分销商分类 | `/distributor-categories` |
-| 分销商 | `/distributors`、`.../addresses`、`.../payment-accounts`、`.../payment-qrs` |
+| 分销商 | `/distributors`、`.../addresses`、`.../payment-accounts`（退款账号） |
 | 批发价 | `/sku-prices`、`GET /skus/:id/wholesale-options` |
 | 商品代理 | `/product-skus/search`、`/products/search`、`/products/:id/skus` |
 | 分销订单 | `/dist-orders`（含 merge / submit / mark-paid / complete / cancel 等） |

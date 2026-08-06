@@ -61,7 +61,7 @@ function navigate(path: string) {
         </template>
         <el-menu-item index="/dist-orders" @click="navigate('/dist-orders')">全部订单</el-menu-item>
         <el-menu-item index="/dist-orders/dropship" @click="navigate('/dist-orders/dropship')">
-          代发订单
+          分销直发
         </el-menu-item>
         <el-menu-item index="/dist-orders/wholesale" @click="navigate('/dist-orders/wholesale')">
           批发订单

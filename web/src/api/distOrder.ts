@@ -110,7 +110,7 @@ export const PAY_STATUS_MAP: Record<string, string> = {
 
 export const FULFILLMENT_TYPE_MAP: Record<string, string> = {
   wholesale: '批发',
-  dropship: '代发',
+  dropship: '分销直发',
 }
 
 export async function fetchDistOrders(params: {

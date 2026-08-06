@@ -22,6 +22,8 @@ const KEY = 'selfcore.distOrderListIntent'
 
 type IntentListener = () => void
 let intentListener: IntentListener | null = null
+/** 内存优先，避免 sessionStorage 分区/不可用时意图丢失 */
+let pendingIntent: DistOrderListIntent | null = null
 
 /** 列表页注册：同路径再次带意图进入时回调 */
 export function onDistOrderListIntent(listener: IntentListener) {
@@ -32,6 +34,7 @@ export function onDistOrderListIntent(listener: IntentListener) {
 }
 
 export function setDistOrderListIntent(intent: DistOrderListIntent) {
+  pendingIntent = intent
   try {
     sessionStorage.setItem(KEY, JSON.stringify(intent))
   } catch {
@@ -41,6 +44,16 @@ export function setDistOrderListIntent(intent: DistOrderListIntent) {
 
 /** 读取并清除意图 */
 export function takeDistOrderListIntent(): DistOrderListIntent | null {
+  const mem = pendingIntent
+  pendingIntent = null
+  if (mem) {
+    try {
+      sessionStorage.removeItem(KEY)
+    } catch {
+      // ignore
+    }
+    return mem
+  }
   try {
     const raw = sessionStorage.getItem(KEY)
     if (!raw) return null
@@ -63,7 +76,7 @@ export function goDistOrders(
 
   const samePath = router.currentRoute.value.path === path
   void router.push(path).then(() => {
-    // 同路径 push 不会触发路由 watch，需显式通知列表重新应用意图
+    // 同路径 push 不会触发路由 watch / 组件重建，需显式通知列表重新应用意图
     if (samePath) intentListener?.()
   })
 }

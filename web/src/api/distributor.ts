@@ -80,28 +80,10 @@ export interface DistributorPaymentAccount {
   remark?: string
 }
 
-export interface DistributorPaymentQR {
-  id: number
-  distributorId: number
-  label: string
-  payType: string
-  imageUrl: string
-  accountName?: string
-  isDefault: boolean
-  status: number
-  remark?: string
-}
-
 export const ACCOUNT_TYPE_MAP: Record<string, string> = {
   bank: '银行账户',
   alipay: '支付宝',
   wechat: '微信',
-  other: '其他',
-}
-
-export const PAY_TYPE_MAP: Record<string, string> = {
-  wechat: '微信',
-  alipay: '支付宝',
   other: '其他',
 }
 
@@ -206,22 +188,6 @@ export async function updateDistributorPaymentAccount(distributorId: number, acc
 
 export async function deleteDistributorPaymentAccount(distributorId: number, accountId: number) {
   return unwrap(await client.delete(`/distributors/${distributorId}/payment-accounts/${accountId}`))
-}
-
-export async function fetchDistributorPaymentQRs(distributorId: number) {
-  return unwrap<DistributorPaymentQR[]>(await client.get(`/distributors/${distributorId}/payment-qrs`))
-}
-
-export async function createDistributorPaymentQR(distributorId: number, data: Partial<DistributorPaymentQR>) {
-  return unwrap<DistributorPaymentQR>(await client.post(`/distributors/${distributorId}/payment-qrs`, data))
-}
-
-export async function updateDistributorPaymentQR(distributorId: number, qrId: number, data: Partial<DistributorPaymentQR>) {
-  return unwrap<DistributorPaymentQR>(await client.put(`/distributors/${distributorId}/payment-qrs/${qrId}`, data))
-}
-
-export async function deleteDistributorPaymentQR(distributorId: number, qrId: number) {
-  return unwrap(await client.delete(`/distributors/${distributorId}/payment-qrs/${qrId}`))
 }
 
 export async function fetchSkuPrices(params: { skuId?: number; distributorId?: number; page?: number; pageSize?: number }) {

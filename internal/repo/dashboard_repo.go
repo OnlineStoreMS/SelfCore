@@ -43,6 +43,20 @@ func (r *DashboardRepo) CountOffers(activeOnly bool) (int64, error) {
 	return n, err
 }
 
+func (r *DashboardRepo) CountSelfOrdersSince(dayStart *time.Time, excludeCancelled bool) (int64, error) {
+	q := r.db.Model(&model.SelfOrder{}).Scopes(scopeTenant(r.tenantID))
+	if excludeCancelled {
+		q = q.Where("status <> ?", model.SelfOrderStatusCancelled)
+	}
+	if dayStart != nil {
+		end := dayStart.Add(24 * time.Hour)
+		q = q.Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", *dayStart, end)
+	}
+	var n int64
+	err := q.Count(&n).Error
+	return n, err
+}
+
 func (r *DashboardRepo) CountPOsByStatus(status string) (int64, error) {
 	return r.CountPOsByStatusSince(status, nil)
 }
@@ -143,24 +157,128 @@ func (r *DashboardRepo) SumPOAmountSince(since time.Time) (float64, error) {
 	return sum, err
 }
 
-// SumDropshipSaleAndPurchaseOnDay 今日代发销售额 / 采购金额。
-// 仅统计已填采购金额（total_amount > 0）的代发单；业务日，排除草稿与取消。
-func (r *DashboardRepo) SumDropshipSaleAndPurchaseOnDay(dayStart time.Time) (saleAmount, wholesaleAmount float64, err error) {
+// SumDistCostAmountOnDay 业务日分销成本额（全部分销类型 total_amount）。
+func (r *DashboardRepo) SumDistCostAmountOnDay(dayStart time.Time) (float64, error) {
+	var sum float64
+	q := r.db.Model(&model.DistOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status NOT IN ?", []string{"draft", "cancelled"})
+	q = scopePOBusinessDay(q, &dayStart)
+	err := q.Select("COALESCE(SUM(total_amount), 0)").Scan(&sum).Error
+	return sum, err
+}
+
+// SumSelfCostAmountOnDay 业务日自营成本额。
+func (r *DashboardRepo) SumSelfCostAmountOnDay(dayStart time.Time) (float64, error) {
+	var sum float64
+	end := dayStart.Add(24 * time.Hour)
+	err := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status <> ?", model.SelfOrderStatusCancelled).
+		Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", dayStart, end).
+		Select("COALESCE(SUM(cost_amount), 0)").
+		Scan(&sum).Error
+	return sum, err
+}
+
+// SumSelfCostAmountSince 自 since 起自营成本额累计。
+func (r *DashboardRepo) SumSelfCostAmountSince(since time.Time) (float64, error) {
+	var sum float64
+	err := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status <> ?", model.SelfOrderStatusCancelled).
+		Where("COALESCE(ordered_at, created_at) >= ?", since).
+		Select("COALESCE(SUM(cost_amount), 0)").
+		Scan(&sum).Error
+	return sum, err
+}
+
+const sqlDistSaleExpr = `CASE WHEN fulfillment_type = ? THEN sale_amount ELSE total_amount END`
+
+// SumDistSaleAmountOnDay 今日全部分销类型销售额：直发按 sale_amount，批发按 total_amount。
+func (r *DashboardRepo) SumDistSaleAmountOnDay(dayStart time.Time) (float64, error) {
+	return r.sumDistSaleAmount(func(q *gorm.DB) *gorm.DB {
+		return scopePOBusinessDay(q, &dayStart)
+	})
+}
+
+// SumDistSaleAmountSince 自 since 起全部分销销售额累计。
+func (r *DashboardRepo) SumDistSaleAmountSince(since time.Time) (float64, error) {
+	return r.sumDistSaleAmount(func(q *gorm.DB) *gorm.DB {
+		return q.Where("COALESCE(ordered_at, created_at) >= ?", since)
+	})
+}
+
+func (r *DashboardRepo) sumDistSaleAmount(scopeFn func(*gorm.DB) *gorm.DB) (float64, error) {
+	var sum float64
+	q := r.db.Model(&model.DistOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status NOT IN ?", []string{"draft", "cancelled"})
+	q = scopeFn(q)
+	err := q.Select(`COALESCE(SUM(`+sqlDistSaleExpr+`), 0)`, model.DistFulfillmentDropship).Scan(&sum).Error
+	return sum, err
+}
+
+// SumSelfSaleAmountOnDay 今日自营销售额。
+func (r *DashboardRepo) SumSelfSaleAmountOnDay(dayStart time.Time) (float64, error) {
+	var sum float64
+	end := dayStart.Add(24 * time.Hour)
+	err := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status <> ?", model.SelfOrderStatusCancelled).
+		Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", dayStart, end).
+		Select("COALESCE(SUM(sale_amount), 0)").
+		Scan(&sum).Error
+	return sum, err
+}
+
+// SumSelfSaleAmountSince 自 since 起自营销售额累计。
+func (r *DashboardRepo) SumSelfSaleAmountSince(since time.Time) (float64, error) {
+	var sum float64
+	err := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status <> ?", model.SelfOrderStatusCancelled).
+		Where("COALESCE(ordered_at, created_at) >= ?", since).
+		Select("COALESCE(SUM(sale_amount), 0)").
+		Scan(&sum).Error
+	return sum, err
+}
+
+// SumSelfSaleAndCostWithCostOnDay 业务日自营：仅成本额 > 0 的订单销售额与成本（用于毛利）。
+func (r *DashboardRepo) SumSelfSaleAndCostWithCostOnDay(dayStart time.Time) (saleAmount, costAmount float64, err error) {
 	type row struct {
-		SaleAmount     float64
-		WholesaleAmount float64
+		SaleAmount float64
+		CostAmount float64
+	}
+	var out row
+	end := dayStart.Add(24 * time.Hour)
+	err = r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status <> ?", model.SelfOrderStatusCancelled).
+		Where("cost_amount > 0").
+		Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", dayStart, end).
+		Select("COALESCE(SUM(sale_amount), 0) as sale_amount, COALESCE(SUM(cost_amount), 0) as cost_amount").
+		Scan(&out).Error
+	return out.SaleAmount, out.CostAmount, err
+}
+
+// SumDistSaleAndCostWithCostOnDay 业务日分销：仅成本额(total_amount) > 0 的订单销售额与成本（用于毛利）。
+func (r *DashboardRepo) SumDistSaleAndCostWithCostOnDay(dayStart time.Time) (saleAmount, costAmount float64, err error) {
+	type row struct {
+		SaleAmount float64
+		CostAmount float64
 	}
 	var out row
 	q := r.db.Model(&model.DistOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
-		Where("fulfillment_type = ?", model.DistFulfillmentDropship).
 		Where("status NOT IN ?", []string{"draft", "cancelled"}).
 		Where("total_amount > 0")
 	q = scopePOBusinessDay(q, &dayStart)
 	err = q.Select(
-		"COALESCE(SUM(sale_amount), 0) as sale_amount, COALESCE(SUM(total_amount), 0) as purchase_amount",
+		`COALESCE(SUM(`+sqlDistSaleExpr+`), 0) as sale_amount, COALESCE(SUM(total_amount), 0) as cost_amount`,
+		model.DistFulfillmentDropship,
 	).Scan(&out).Error
-	return out.SaleAmount, out.WholesaleAmount, err
+	return out.SaleAmount, out.CostAmount, err
 }
 
 func (r *DashboardRepo) SumUnpaidAmount() (float64, error) {
@@ -265,8 +383,9 @@ func NormalizeDashboardRange(start, end time.Time) (time.Time, time.Time, error)
 
 const sqlPOBizDay = `COALESCE(ordered_at, created_at)`
 
-// DailyDropshipTrend 代发按日趋势：订单量含全部有效代发；销售额/采购额/毛利仅统计 total_amount > 0。
-func (r *DashboardRepo) DailyDropshipTrend(start, end time.Time) (points []dto.DashboardTrendPoint, err error) {
+// DailyAllTypesTrend 自营+全部分销按日趋势。
+// 销售额/成本额含全部订单；毛利润仅统计成本额 > 0 的订单。
+func (r *DashboardRepo) DailyAllTypesTrend(start, end time.Time) (points []dto.DashboardTrendPoint, err error) {
 	start, end, err = NormalizeDashboardRange(start, end)
 	if err != nil {
 		return nil, err
@@ -274,45 +393,80 @@ func (r *DashboardRepo) DailyDropshipTrend(start, end time.Time) (points []dto.D
 	endExclusive := end.AddDate(0, 0, 1)
 	days := int(end.Sub(start).Hours()/24) + 1
 
-	type row struct {
-		Day            string
-		OrderCount     int64
-		SaleAmount     float64
-		WholesaleAmount float64
-		Profit         float64
+	type dayAgg struct {
+		Day          string
+		OrderCount   int64
+		SaleAmount   float64
+		CostAmount   float64
+		ProfitAmount float64
 	}
-	var rows []row
+
+	byDay := make(map[string]*dto.DashboardTrendPoint, days)
+	ensure := func(day string) *dto.DashboardTrendPoint {
+		if p, ok := byDay[day]; ok {
+			return p
+		}
+		p := &dto.DashboardTrendPoint{Date: day}
+		byDay[day] = p
+		return p
+	}
+
+	var selfRows []dayAgg
+	err = r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Select(`to_char(date_trunc('day', `+sqlPOBizDay+`), 'YYYY-MM-DD') as day,
+			COUNT(*) as order_count,
+			COALESCE(SUM(sale_amount), 0) as sale_amount,
+			COALESCE(SUM(cost_amount), 0) as cost_amount,
+			COALESCE(SUM(CASE WHEN cost_amount > 0 THEN sale_amount - cost_amount ELSE 0 END), 0) as profit_amount`).
+		Where("status <> ?", model.SelfOrderStatusCancelled).
+		Where(sqlPOBizDay+" >= ? AND "+sqlPOBizDay+" < ?", start, endExclusive).
+		Group("day").
+		Order("day ASC").
+		Scan(&selfRows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range selfRows {
+		p := ensure(row.Day)
+		p.SelfOrderCount = row.OrderCount
+		p.SelfSaleAmount = row.SaleAmount
+		p.OrderCount += row.OrderCount
+		p.SaleAmount += row.SaleAmount
+		p.WholesaleAmount += row.CostAmount
+		p.Profit += row.ProfitAmount
+	}
+
+	var distRows []dayAgg
 	err = r.db.Model(&model.DistOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
 		Select(`to_char(date_trunc('day', `+sqlPOBizDay+`), 'YYYY-MM-DD') as day,
 			COUNT(*) as order_count,
-			COALESCE(SUM(CASE WHEN total_amount > 0 THEN sale_amount ELSE 0 END), 0) as sale_amount,
-			COALESCE(SUM(CASE WHEN total_amount > 0 THEN total_amount ELSE 0 END), 0) as purchase_amount,
-			COALESCE(SUM(CASE WHEN total_amount > 0 THEN sale_amount - total_amount ELSE 0 END), 0) as profit`).
-		Where("fulfillment_type = ?", model.DistFulfillmentDropship).
+			COALESCE(SUM(`+sqlDistSaleExpr+`), 0) as sale_amount,
+			COALESCE(SUM(total_amount), 0) as cost_amount,
+			COALESCE(SUM(CASE WHEN total_amount > 0 THEN (`+sqlDistSaleExpr+`) - total_amount ELSE 0 END), 0) as profit_amount`,
+			model.DistFulfillmentDropship, model.DistFulfillmentDropship).
 		Where("status NOT IN ?", []string{"draft", "cancelled"}).
 		Where(sqlPOBizDay+" >= ? AND "+sqlPOBizDay+" < ?", start, endExclusive).
 		Group("day").
 		Order("day ASC").
-		Scan(&rows).Error
+		Scan(&distRows).Error
 	if err != nil {
 		return nil, err
 	}
-	byDay := make(map[string]dto.DashboardTrendPoint, len(rows))
-	for _, r0 := range rows {
-		byDay[r0.Day] = dto.DashboardTrendPoint{
-			Date:           r0.Day,
-			OrderCount:     r0.OrderCount,
-			SaleAmount:     r0.SaleAmount,
-			WholesaleAmount: r0.WholesaleAmount,
-			Profit:         r0.Profit,
-		}
+	for _, row := range distRows {
+		p := ensure(row.Day)
+		p.OrderCount += row.OrderCount
+		p.SaleAmount += row.SaleAmount
+		p.WholesaleAmount += row.CostAmount
+		p.Profit += row.ProfitAmount
 	}
+
 	points = make([]dto.DashboardTrendPoint, 0, days)
 	for i := 0; i < days; i++ {
 		d := start.AddDate(0, 0, i).Format("2006-01-02")
 		if p, ok := byDay[d]; ok {
-			points = append(points, p)
+			points = append(points, *p)
 		} else {
 			points = append(points, dto.DashboardTrendPoint{Date: d})
 		}

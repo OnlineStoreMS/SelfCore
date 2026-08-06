@@ -8,6 +8,8 @@ import (
 	"selfcore/internal/config"
 	"selfcore/internal/integrations/ordercore"
 	"selfcore/internal/integrations/productcore"
+	"selfcore/internal/integrations/shippingcore"
+	"selfcore/internal/integrations/warehousecore"
 	jwtmgr "selfcore/internal/pkg/jwt"
 	"selfcore/internal/repo"
 	"selfcore/internal/service"
@@ -41,8 +43,11 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	doSvc := service.NewDistOrderService(repos)
 	pcClient := productcore.NewClient(cfg.Integrations.ProductCoreAPIURL)
 	ocClient := ordercore.NewClient(cfg.Integrations.OrderCoreAPIURL)
+	whClient := warehousecore.NewClient(cfg.Integrations.WarehouseCoreAPIURL)
+	shipClient := shippingcore.NewClient(cfg.Integrations.ShippingCoreAPIURL)
 	trackSvc := service.NewTrackingService(repos)
 	dashSvc := service.NewDashboardService(repos)
+	selfOrderSvc := service.NewSelfOrderService(repos, whClient, ocClient, shipClient)
 
 	distributorH := admin.NewDistributorHandler(distributorSvc)
 	priceH := admin.NewPriceHandler(priceSvc)
@@ -51,6 +56,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	skuH := admin.NewProductSkuHandler(pcClient)
 	dashH := admin.NewDashboardHandler(dashSvc)
 	orderH := admin.NewOrderHandler(ocClient)
+	selfOrderH := admin.NewSelfOrderHandler(selfOrderSvc)
+	whH := admin.NewWarehouseHandler(whClient)
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok", "service": "selfcore"})
@@ -69,7 +76,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	adminGroup.Use(adminmw.AdminAuth(&cfg.Auth, jwtMgr))
 	adminGroup.POST("/photo-upload-sessions", photoH.CreateSession)
 	adminGroup.GET("/photo-upload-sessions/:token", photoH.GetSession)
-	admin.RegisterRoutes(adminGroup, distributorH, priceH, doH, trackH, skuH, dashH, orderH)
+	admin.RegisterRoutes(adminGroup, distributorH, priceH, doH, trackH, skuH, dashH, orderH, selfOrderH, whH)
 
 	return r
 }

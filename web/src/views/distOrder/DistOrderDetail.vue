@@ -453,14 +453,7 @@ async function handleCopy() {
                 <el-tag v-if="row.cancelled" type="info" size="small" class="cancel-tag">已撤回</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="productName" label="商品" min-width="180" show-overflow-tooltip>
-              <template #default="{ row }">
-                <span :class="{ 'line-cancelled': row.cancelled }">
-                  {{ row.productName || skuMap.get(row.skuId)?.productName || '—' }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="规格" width="130" show-overflow-tooltip>
+            <el-table-column label="规格" min-width="240" show-overflow-tooltip>
               <template #default="{ row }">
                 <span :class="{ 'line-cancelled': row.cancelled }">
                   {{ row.skuSpecs || skuMap.get(row.skuId)?.specLabel || '—' }}

@@ -22,7 +22,7 @@ import {
   canDecryptOrder,
   isMaskedReceiver,
 } from '../../utils/orderCopy'
-import { dateShortcuts, last7DaysDateTimeRange, todayDateTimeRange } from '../../utils/date'
+import { dateShortcuts, dateRangeDefaultTime, last7DaysDateTimeRange, todayDateTimeRange } from '../../utils/date'
 import { onDistOrderListIntent, takeDistOrderListIntent } from '../../utils/distOrderListIntent'
 
 const route = useRoute()
@@ -79,33 +79,34 @@ function listPathForType(ft: string) {
   return '/dist-orders'
 }
 
-const activeTab = computed({
-  get: () => fulfillmentType.value || 'all',
-  set: (v: string) => {
-    const ft = v === 'all' ? '' : v
-    fulfillmentType.value = ft
-    page.value = 1
-    selected.value = []
-    status.value = ''
-    statusesFilter.value = ''
-    payStatusFilter.value = ''
-    excludeStatusesFilter.value = ''
-    const target = listPathForType(ft)
-    if (route.path !== target) {
-      void router.replace(target)
-    }
-    void loadData()
-  },
-})
+const activeTab = computed(() => fulfillmentType.value || 'all')
+
+/** 用户手动切 Tab 时重置状态类筛选；勿用 computed setter，避免挂载时冲掉工作台意图 */
+function onTypeTabChange(name: string | number) {
+  const ft = String(name) === 'all' ? '' : String(name)
+  fulfillmentType.value = ft
+  page.value = 1
+  selected.value = []
+  status.value = ''
+  statusesFilter.value = ''
+  payStatusFilter.value = ''
+  excludeStatusesFilter.value = ''
+  const target = listPathForType(ft)
+  if (route.path !== target) {
+    void router.replace(target)
+    return
+  }
+  void loadData()
+}
 
 const pageTitle = computed(() => {
-  if (fulfillmentType.value === 'dropship') return '代发'
+  if (fulfillmentType.value === 'dropship') return '分销直发'
   if (fulfillmentType.value === 'wholesale') return '批发'
   return '分销订单'
 })
 
 const createLabel = computed(() => {
-  if (fulfillmentType.value === 'dropship') return '新建代发单'
+  if (fulfillmentType.value === 'dropship') return '新建分销直发单'
   if (fulfillmentType.value === 'wholesale') return '新建分销订单'
   return '新建分销订单'
 })
@@ -125,18 +126,17 @@ function isMergeableDropship(row: DistOrderListItem) {
   return true
 }
 
+function resolveFulfillmentFromRoute(): string {
+  const metaFt = route.meta.fulfillmentType
+  if (typeof metaFt === 'string' && metaFt) return metaFt
+  if (route.path.endsWith('/dropship')) return 'dropship'
+  if (route.path.endsWith('/wholesale')) return 'wholesale'
+  return ''
+}
+
 /** 从路径 / meta / 进入意图初始化筛选；不把筛选写回地址栏 */
 function applyRouteContext() {
-  const metaFt = route.meta.fulfillmentType
-  if (typeof metaFt === 'string' && metaFt) {
-    fulfillmentType.value = metaFt
-  } else if (route.path.endsWith('/dropship')) {
-    fulfillmentType.value = 'dropship'
-  } else if (route.path.endsWith('/wholesale')) {
-    fulfillmentType.value = 'wholesale'
-  } else {
-    fulfillmentType.value = ''
-  }
+  fulfillmentType.value = resolveFulfillmentFromRoute()
 
   const intent = takeDistOrderListIntent()
   if (intent) {
@@ -145,6 +145,9 @@ function applyRouteContext() {
     payStatusFilter.value = ''
     excludeStatusesFilter.value = ''
 
+    if (intent.fulfillmentType) {
+      fulfillmentType.value = intent.fulfillmentType
+    }
     if (intent.statuses?.length) {
       if (intent.statuses.length === 1) {
         status.value = intent.statuses[0]
@@ -262,6 +265,63 @@ watch(
     void loadData()
   },
 )
+
+const intentTags = computed(() => {
+  const tags: { key: string; label: string; clear: () => void }[] = []
+  if (excludeStatusesFilter.value) {
+    const labels = excludeStatusesFilter.value
+      .split(',')
+      .map((s) => statusLabel(s.trim()))
+      .filter(Boolean)
+    if (labels.length) {
+      tags.push({
+        key: 'exclude',
+        label: `排除：${labels.join(' / ')}`,
+        clear: () => {
+          excludeStatusesFilter.value = ''
+          page.value = 1
+          void loadData()
+        },
+      })
+    }
+  }
+  if (statusesFilter.value) {
+    const labels = statusesFilter.value
+      .split(',')
+      .map((s) => statusLabel(s.trim()))
+      .filter(Boolean)
+    if (labels.length) {
+      tags.push({
+        key: 'statuses',
+        label: `状态：${labels.join(' / ')}`,
+        clear: () => {
+          statusesFilter.value = ''
+          page.value = 1
+          void loadData()
+        },
+      })
+    }
+  }
+  if (payStatusFilter.value) {
+    const labels = payStatusFilter.value
+      .split(',')
+      .map((s) => PAY_STATUS_MAP[s.trim()] || s.trim())
+      .filter(Boolean)
+    if (labels.length) {
+      tags.push({
+        key: 'pay',
+        label: `收款：${labels.join(' / ')}`,
+        clear: () => {
+          payStatusFilter.value = ''
+          page.value = 1
+          void loadData()
+        },
+      })
+    }
+  }
+  return tags
+})
+
 function statusLabel(s: string) {
   return DIST_STATUS_MAP[s]?.label || s
 }
@@ -455,9 +515,9 @@ async function handleDelete(row: DistOrderListItem) {
         </div>
       </template>
 
-      <el-tabs v-model="activeTab" class="type-tabs">
+      <el-tabs :model-value="activeTab" class="type-tabs" @tab-change="onTypeTabChange">
         <el-tab-pane label="全部" name="all" />
-        <el-tab-pane label="代发" name="dropship" />
+        <el-tab-pane label="分销直发" name="dropship" />
         <el-tab-pane label="批发" name="wholesale" />
       </el-tabs>
 
@@ -505,6 +565,7 @@ async function handleDelete(row: DistOrderListItem) {
               end-placeholder="结束"
               value-format="YYYY-MM-DD HH:mm:ss"
               :shortcuts="dateShortcuts"
+              :default-time="dateRangeDefaultTime"
               clearable
               style="width: 360px"
               @change="onFilterChange"
@@ -519,12 +580,25 @@ async function handleDelete(row: DistOrderListItem) {
               end-placeholder="结束"
               value-format="YYYY-MM-DD HH:mm:ss"
               :shortcuts="dateShortcuts"
+              :default-time="dateRangeDefaultTime"
               clearable
               style="width: 360px"
               @change="onFilterChange"
             />
           </el-form-item>
         </el-form>
+        <div v-if="intentTags.length" class="intent-tags">
+          <el-tag
+            v-for="tag in intentTags"
+            :key="tag.key"
+            closable
+            type="warning"
+            effect="plain"
+            @close="tag.clear()"
+          >
+            {{ tag.label }}
+          </el-tag>
+        </div>
       </div>
 
       <el-table
@@ -648,9 +722,19 @@ async function handleDelete(row: DistOrderListItem) {
   display: flex;
   flex-wrap: wrap;
   margin-bottom: 12px;
+  gap: 8px;
+  align-items: flex-start;
 }
 .toolbar :deep(.el-form-item) {
   margin-bottom: 8px;
+}
+.intent-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  margin-top: 4px;
 }
 .pager {
   margin-top: 16px;

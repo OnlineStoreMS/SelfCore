@@ -33,8 +33,10 @@ type AuthConfig struct {
 }
 
 type IntegrationsConfig struct {
-	ProductCoreAPIURL string `mapstructure:"productcore_api_url"`
-	OrderCoreAPIURL   string `mapstructure:"ordercore_api_url"`
+	ProductCoreAPIURL   string `mapstructure:"productcore_api_url"`
+	OrderCoreAPIURL     string `mapstructure:"ordercore_api_url"`
+	WarehouseCoreAPIURL string `mapstructure:"warehousecore_api_url"`
+	ShippingCoreAPIURL  string `mapstructure:"shippingcore_api_url"`
 }
 
 type StorageConfig struct {
@@ -91,6 +93,9 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Integrations.OrderCoreAPIURL == "" {
 		cfg.Integrations.OrderCoreAPIURL = "http://127.0.0.1:8098"
+	}
+	if cfg.Integrations.WarehouseCoreAPIURL == "" {
+		cfg.Integrations.WarehouseCoreAPIURL = "http://127.0.0.1:8095"
 	}
 	if cfg.Storage.LocalPath == "" {
 		cfg.Storage.LocalPath = "./data/uploads"

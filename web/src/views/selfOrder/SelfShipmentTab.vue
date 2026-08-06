@@ -1,34 +1,39 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
-import type { DistOrder, DistOrderItem } from '../../api/distOrder'
+import { Delete } from '@element-plus/icons-vue'
+import type { SelfOrderDetail, SelfOrderItem } from '../../api/selfOrder'
 import {
-  fetchShipments, createShipment, updateShipmentStatus, deleteShipment,
-  syncShipmentsFromOrders,
-  fetchAttachments, createAttachment,
-  SHIPMENT_STATUS_MAP, type Shipment, type Attachment,
-} from '../../api/tracking'
+  fetchSelfShipments,
+  createSelfShipment,
+  updateSelfShipmentStatus,
+  deleteSelfShipment,
+  syncSelfShipmentsFromOrders,
+  fetchSelfAttachments,
+  createSelfAttachment,
+  type SelfShipment,
+  type SelfAttachment,
+} from '../../api/selfOrderTracking'
+import { SHIPMENT_STATUS_MAP } from '../../api/tracking'
 import { fetchOrder, formatOrderReceiverAddress, shipOrder } from '../../api/order'
+import { retryCallback } from '../../api/selfOrder'
 import { EXPRESS_COMPANIES, findExpressCompany } from '../../constants/expressCompanies'
 import ScanImageUpload from '../../components/ScanImageUpload.vue'
 
-const props = defineProps<{ poId: number; po: DistOrder; readonly: boolean }>()
+const props = defineProps<{ selfOrderId: number; order: SelfOrderDetail; readonly: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()
-
-const isDropship = computed(() => props.po.fulfillmentType === 'dropship')
 
 const loading = ref(false)
 const syncing = ref(false)
 const callbacking = ref(false)
 const saving = ref(false)
-const list = ref<Shipment[]>([])
-const attachments = ref<Attachment[]>([])
+const list = ref<SelfShipment[]>([])
+const attachments = ref<SelfAttachment[]>([])
 const dialogVisible = ref(false)
 const callbackVisible = ref(false)
 const photoVisible = ref(false)
 const photoSaving = ref(false)
-const photoTarget = ref<Shipment | null>(null)
+const photoTarget = ref<SelfShipment | null>(null)
 const photoUrls = ref<string[]>([])
 const pendingPhotoUrls = ref<string[]>([])
 const loadingAddr = ref(false)
@@ -83,7 +88,7 @@ function fileNameFromUrl(url: string, fallback = '物流照片.jpg') {
 }
 
 const photosByShipment = computed(() => {
-  const map = new Map<number, Attachment[]>()
+  const map = new Map<number, SelfAttachment[]>()
   for (const a of attachments.value) {
     if (a.fileType !== 'shipment_photo' || !a.shipmentId) continue
     const arr = map.get(a.shipmentId) || []
@@ -95,7 +100,7 @@ const photosByShipment = computed(() => {
 
 async function bindShipmentPhotos(shipmentId: number, urls: string[]) {
   for (const url of urls) {
-    await createAttachment(props.poId, {
+    await createSelfAttachment(props.selfOrderId, {
       fileType: 'shipment_photo',
       fileName: fileNameFromUrl(url),
       fileUrl: url,
@@ -106,7 +111,7 @@ async function bindShipmentPhotos(shipmentId: number, urls: string[]) {
 }
 
 interface LinePick {
-  distOrderItemId: number
+  selfOrderItemId: number
   productName: string
   skuCode: string
   skuSpecs: string
@@ -136,8 +141,8 @@ const activeGroupKey = ref('')
 const addressHint = ref('')
 
 const itemLabelMap = computed(() => {
-  const map = new Map<number, DistOrderItem>()
-  for (const it of props.po.items || []) {
+  const map = new Map<number, SelfOrderItem>()
+  for (const it of props.order.items || []) {
     if (it.id) map.set(it.id, it)
   }
   return map
@@ -147,7 +152,7 @@ function shippedQtyByItem(): Map<number, number> {
   const map = new Map<number, number>()
   for (const sh of list.value) {
     for (const it of sh.items || []) {
-      map.set(it.distOrderItemId, (map.get(it.distOrderItemId) || 0) + it.qty)
+      map.set(it.selfOrderItemId, (map.get(it.selfOrderItemId) || 0) + it.qty)
     }
   }
   return map
@@ -155,13 +160,13 @@ function shippedQtyByItem(): Map<number, number> {
 
 function rebuildLinePicks() {
   const shipped = shippedQtyByItem()
-  linePicks.value = (props.po.items || [])
-    .filter((it) => it.id && !it.cancelled)
+  linePicks.value = (props.order.items || [])
+    .filter((it) => it.id)
     .map((it) => {
       const shippedQty = shipped.get(it.id!) || 0
       const remaining = Math.max(0, it.qty - shippedQty)
       return {
-        distOrderItemId: it.id!,
+        selfOrderItemId: it.id!,
         productName: it.productName || '—',
         skuCode: it.skuCode || '',
         skuSpecs: it.skuSpecs || '',
@@ -169,7 +174,7 @@ function rebuildLinePicks() {
         qty: it.qty,
         shippedQty,
         remaining,
-        selected: !isDropship.value && remaining > 0,
+        selected: remaining > 0,
         shipQty: remaining > 0 ? remaining : 1,
         refSoId: it.refSoId || 0,
         refOrderNo: it.refOrderNo || '',
@@ -179,19 +184,19 @@ function rebuildLinePicks() {
 
 function rebuildSoGroups() {
   rebuildLinePicks()
-  const headerSoId = Number(props.po.refSoId || 0)
-  const headerOrderNo = (props.po.refTraceId || '').trim()
+  const headerSoId = Number(props.order.refSoId || 0)
+  const headerOrderNo = (props.order.refTraceId || '').trim()
   const map = new Map<string, SalesOrderGroup>()
   for (const line of linePicks.value) {
     const orderNo = (line.refOrderNo || '').trim() || (headerOrderNo.includes(',') ? '' : headerOrderNo)
     const soId = line.refSoId || headerSoId || 0
-    const key = soId > 0 ? `id:${soId}` : orderNo ? `no:${orderNo}` : `item:${line.distOrderItemId}`
+    const key = soId > 0 ? `id:${soId}` : orderNo ? `no:${orderNo}` : `item:${line.selfOrderItemId}`
     let g = map.get(key)
     if (!g) {
       g = {
         key,
         refSoId: soId,
-        refOrderNo: orderNo || (soId ? `订单#${soId}` : `明细#${line.distOrderItemId}`),
+        refOrderNo: orderNo || (soId ? `订单#${soId}` : `明细#${line.selfOrderItemId}`),
         lines: [],
         remainingQty: 0,
         receiverHint: '',
@@ -224,7 +229,7 @@ const soGroupRows = computed(() => {
       const done = line.remaining <= 0
       const partial = line.shippedQty > 0 && !done
       rows.push({
-        key: `${g.key}:${line.distOrderItemId}`,
+        key: `${g.key}:${line.selfOrderItemId}`,
         group: g,
         line,
         lineStatus: done ? '已登记物流' : partial ? '部分发货' : '待发货',
@@ -239,26 +244,26 @@ function formatSpecLabel(specs?: string, qty?: number) {
   return qty != null ? `${s} ×${qty}` : s
 }
 
-function shipmentSpecText(row: Shipment) {
+function shipmentSpecText(row: SelfShipment) {
   const items = row.items || []
   if (!items.length) return '—'
   return items
     .map((it) => {
-      const poItem = itemLabelMap.value.get(it.distOrderItemId)
-      return formatSpecLabel(poItem?.skuSpecs, it.qty)
+      const orderItem = itemLabelMap.value.get(it.selfOrderItemId)
+      return formatSpecLabel(orderItem?.skuSpecs, it.qty)
     })
     .join('；')
 }
 
-function shipmentSalesOrders(row: Shipment) {
+function shipmentSalesOrders(row: SelfShipment) {
   const nos = new Set<string>()
-  const headerOrderNo = (props.po.refTraceId || '').trim()
-  const headerSoId = Number(props.po.refSoId || 0)
+  const headerOrderNo = (props.order.refTraceId || '').trim()
+  const headerSoId = Number(props.order.refSoId || 0)
   for (const it of row.items || []) {
-    const poItem = itemLabelMap.value.get(it.distOrderItemId)
-    const no = poItem?.refOrderNo?.trim()
+    const orderItem = itemLabelMap.value.get(it.selfOrderItemId)
+    const no = orderItem?.refOrderNo?.trim()
     if (no) nos.add(no)
-    else if (poItem?.refSoId) nos.add(`订单#${poItem.refSoId}`)
+    else if (orderItem?.refSoId) nos.add(`订单#${orderItem.refSoId}`)
   }
   if (!nos.size && headerOrderNo && !headerOrderNo.includes(',')) nos.add(headerOrderNo)
   else if (!nos.size && headerSoId) nos.add(`订单#${headerSoId}`)
@@ -269,12 +274,12 @@ async function loadData() {
   loading.value = true
   try {
     const [shipments, files] = await Promise.all([
-      fetchShipments(props.poId),
-      fetchAttachments(props.poId),
+      fetchSelfShipments(props.selfOrderId),
+      fetchSelfAttachments(props.selfOrderId),
     ])
     list.value = shipments
     attachments.value = files
-    if (isDropship.value) rebuildSoGroups()
+    rebuildSoGroups()
   } catch (e) {
     ElMessage.error((e as Error).message || '加载失败')
   } finally {
@@ -283,13 +288,10 @@ async function loadData() {
 }
 
 onMounted(loadData)
-watch(() => props.po.items, () => {
-  if (isDropship.value) rebuildSoGroups()
-  else if (dialogVisible.value) rebuildLinePicks()
+watch(() => props.order.items, () => {
+  rebuildSoGroups()
 })
-watch(isDropship, () => {
-  if (isDropship.value) rebuildSoGroups()
-})
+watch(() => props.selfOrderId, loadData)
 
 function resetForm() {
   form.value = {
@@ -300,12 +302,6 @@ function resetForm() {
   addressHint.value = ''
 }
 
-function openCreateStockIn() {
-  resetForm()
-  rebuildLinePicks()
-  dialogVisible.value = true
-}
-
 async function fillReceiverFromOrder(soId: number) {
   if (!soId) {
     addressHint.value = '该明细未关联销售单 ID，请手工填写收件人'
@@ -314,10 +310,10 @@ async function fillReceiverFromOrder(soId: number) {
   loadingAddr.value = true
   addressHint.value = ''
   try {
-    const order = await fetchOrder(soId)
-    const addr = order.address
-    const name = addr?.name?.trim() || order.buyerName?.trim() || ''
-    const phone = addr?.phone?.trim() || order.buyerPhone?.trim() || ''
+    const ord = await fetchOrder(soId)
+    const addr = ord.address
+    const name = addr?.name?.trim() || ord.buyerName?.trim() || ''
+    const phone = addr?.phone?.trim() || ord.buyerPhone?.trim() || ''
     const address = formatOrderReceiverAddress(addr)
     form.value.receiverName = name
     form.value.receiverPhone = phone
@@ -325,7 +321,7 @@ async function fillReceiverFromOrder(soId: number) {
     if (!name && !phone && !address) {
       addressHint.value = '订单中心暂无明文收件人（可能已脱敏），请到订单中心解密后重试，或手工填写'
     } else {
-      addressHint.value = `已从订单 ${order.orderNo} 带入收件人`
+      addressHint.value = `已从订单 ${ord.orderNo} 带入收件人`
     }
   } catch (e) {
     addressHint.value = (e as Error).message || '拉取订单收件人失败，请手工填写'
@@ -353,7 +349,7 @@ async function openCreateDropship(group: SalesOrderGroup) {
 async function handleSave() {
   const selected = linePicks.value.filter((l) => l.selected && l.remaining > 0)
   if (!selected.length) {
-    ElMessage.warning(isDropship.value ? '该销售单没有可发货明细' : '请选择本物流单对应的商品')
+    ElMessage.warning('该销售单没有可发货明细')
     return
   }
   for (const line of selected) {
@@ -375,37 +371,27 @@ async function handleSave() {
   }
   saving.value = true
   try {
-    const created = await createShipment(props.poId, {
+    const created = await createSelfShipment(props.selfOrderId, {
       ...form.value,
-      items: selected.map((l) => ({ distOrderItemId: l.distOrderItemId, qty: l.shipQty })),
+      callback: true,
+      items: selected.map((l) => ({ selfOrderItemId: l.selfOrderItemId, qty: l.shipQty })),
     })
     if (pendingPhotoUrls.value.length && created?.id) {
       await bindShipmentPhotos(created.id, pendingPhotoUrls.value)
     }
 
-    // 代发：同一弹窗内回传订单中心 → StoreSyncAgent → 快递助手手动发货
-    let callbackMsg = ''
-    const refSoId = activeGroup.value?.refSoId || selected.find((l) => l.refSoId)?.refSoId
-    if (isDropship.value && refSoId) {
-      try {
-        await shipOrder(refSoId, {
-          expressCompany: form.value.carrierName,
-          expressNo: form.value.trackingNo.trim(),
-          remark: form.value.remark || `代发分销订单 ${props.po.distNo || props.poId} 发货回传`,
-          callback: true,
-        })
-        callbackMsg = '，并已回传电商平台'
-        await handleSyncFromOrders(refSoId)
-      } catch (e) {
-        ElMessage.warning(`本地发货已保存，但回传失败：${(e as Error).message || '未知错误'}`)
-        dialogVisible.value = false
-        await loadData()
-        emit('refresh')
-        return
-      }
+    if (!created.callbackOk) {
+      ElMessage.warning('本地发货已保存，但回传订单中心失败，请重试回传')
+      dialogVisible.value = false
+      await loadData()
+      emit('refresh')
+      return
     }
-
-    ElMessage.success(`已添加发货批次${callbackMsg}`)
+    if (!created.stockDeducted && props.order.stockError) {
+      ElMessage.warning(`已回传订单中心，但扣库失败：${props.order.stockError}，可重试扣库`)
+    } else {
+      ElMessage.success('已添加发货批次，并已回传订单中心')
+    }
     dialogVisible.value = false
     await loadData()
     emit('refresh')
@@ -416,7 +402,7 @@ async function handleSave() {
   }
 }
 
-function openUploadPhotos(row: Shipment) {
+function openUploadPhotos(row: SelfShipment) {
   photoTarget.value = row
   photoUrls.value = []
   photoVisible.value = true
@@ -446,11 +432,10 @@ async function openCallback(group: SalesOrderGroup) {
     ElMessage.warning('该销售单缺少订单中心 ID，无法回传')
     return
   }
-  // 优先带出本销售单已登记的物流，避免再填一次
-  const itemIds = new Set(group.lines.map((l) => l.distOrderItemId))
+  const itemIds = new Set(group.lines.map((l) => l.selfOrderItemId))
   const withTracking = list.value.find((s) => {
     if (!s.trackingNo?.trim()) return false
-    return (s.items || []).some((it) => itemIds.has(it.distOrderItemId))
+    return (s.items || []).some((it) => itemIds.has(it.selfOrderItemId))
   }) || list.value.find((s) => !!s.trackingNo?.trim())
 
   callbackForm.value = {
@@ -481,16 +466,29 @@ async function handleCallbackShip() {
   }
   callbacking.value = true
   try {
-    await shipOrder(callbackForm.value.refSoId, {
-      expressCompany: callbackForm.value.carrierName,
-      expressNo: callbackForm.value.trackingNo.trim(),
-      remark: callbackForm.value.remark || `代发分销订单 ${props.po.distNo || props.poId} 回传`,
-      callback: true,
+    const itemIds = new Set(
+      soGroups.value.find((g) => g.refSoId === callbackForm.value.refSoId)?.lines.map((l) => l.selfOrderItemId) || [],
+    )
+    const matched = list.value.find((s) => {
+      if (!s.trackingNo?.trim()) return false
+      return (s.items || []).some((it) => itemIds.has(it.selfOrderItemId))
     })
-    ElMessage.success('已回传订单中心')
+    if (matched && !matched.callbackOk) {
+      await retryCallback(props.selfOrderId, matched.id)
+      ElMessage.success('已重试回传订单中心')
+    } else {
+      await shipOrder(callbackForm.value.refSoId, {
+        expressCompany: callbackForm.value.carrierName,
+        expressNo: callbackForm.value.trackingNo.trim(),
+        remark: callbackForm.value.remark || `自营单 ${props.order.soNo || props.selfOrderId} 回传`,
+        callback: true,
+      })
+      ElMessage.success('已回传订单中心')
+      await handleSyncFromOrders(callbackForm.value.refSoId)
+    }
     callbackVisible.value = false
-    // 回传后补同步本分销订单物流展示
-    await handleSyncFromOrders(callbackForm.value.refSoId)
+    await loadData()
+    emit('refresh')
   } catch (e) {
     ElMessage.error((e as Error).message || '回传失败')
   } finally {
@@ -501,7 +499,7 @@ async function handleCallbackShip() {
 async function handleSyncFromOrders(refSoId?: number) {
   syncing.value = true
   try {
-    const res = await syncShipmentsFromOrders(props.poId, refSoId)
+    const res = await syncSelfShipmentsFromOrders(props.selfOrderId, refSoId)
     const parts = [
       res.created ? `新建 ${res.created}` : '',
       res.updated ? `更新 ${res.updated}` : '',
@@ -520,9 +518,9 @@ async function handleSyncFromOrders(refSoId?: number) {
   }
 }
 
-async function changeStatus(row: Shipment, status: string) {
+async function changeStatus(row: SelfShipment, status: string) {
   try {
-    await updateShipmentStatus(props.poId, row.id, status)
+    await updateSelfShipmentStatus(props.selfOrderId, row.id, status)
     ElMessage.success('状态已更新')
     await loadData()
     emit('refresh')
@@ -531,14 +529,14 @@ async function changeStatus(row: Shipment, status: string) {
   }
 }
 
-async function handleDelete(row: Shipment) {
+async function handleDelete(row: SelfShipment) {
   try {
     await ElMessageBox.confirm('确定删除此发货批次？', '确认')
   } catch {
     return
   }
   try {
-    await deleteShipment(props.poId, row.id)
+    await deleteSelfShipment(props.selfOrderId, row.id)
     ElMessage.success('已删除')
     await loadData()
     emit('refresh')
@@ -547,10 +545,6 @@ async function handleDelete(row: Shipment) {
   }
 }
 
-const dialogTitle = computed(() =>
-  isDropship.value ? '按销售单发货' : '添加发货（按商品）',
-)
-
 const activeGroup = computed(() =>
   soGroups.value.find((g) => g.key === activeGroupKey.value) || null,
 )
@@ -558,61 +552,53 @@ const activeGroup = computed(() =>
 
 <template>
   <div v-loading="loading">
-    <!-- 代发：按销售单分组 -->
-    <template v-if="isDropship">
-      <div v-if="!readonly" class="toolbar">
-        <el-button type="primary" plain :loading="syncing" @click="handleSyncFromOrders()">同步物流</el-button>
-        <span class="hint">代发「发货」会同时回传订单中心与快递助手；也可「回传单号」单独补传</span>
-      </div>
-      <el-table :data="soGroupRows" border stripe class="so-group-table" row-key="key">
-        <el-table-column label="销售单" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.group.refOrderNo }}</template>
-        </el-table-column>
-        <el-table-column label="规格" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">{{ formatSpecLabel(row.line.skuSpecs, row.line.qty) }}</template>
-        </el-table-column>
-        <el-table-column label="待发" width="80" align="center">
-          <template #default="{ row }">
-            <span :class="{ muted: row.line.remaining <= 0 }">{{ row.line.remaining }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100" align="center">
-          <template #default="{ row }">{{ row.lineStatus }}</template>
-        </el-table-column>
-        <el-table-column v-if="!readonly" label="操作" width="180" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              type="primary"
-              link
-              :disabled="row.group.remainingQty <= 0"
-              @click="openCreateDropship(row.group)"
-            >
-              发货
-            </el-button>
-            <el-button
-              type="success"
-              link
-              :disabled="!row.group.refSoId"
-              @click="openCallback(row.group)"
-            >
-              回传单号
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <h4 class="section-title">发货批次</h4>
-    </template>
-
-    <!-- 入仓：原添加发货入口 -->
-    <div v-else-if="!readonly" class="toolbar">
-      <el-button type="primary" :icon="Plus" @click="openCreateStockIn">添加发货</el-button>
-      <span class="hint">每个物流单号需勾选对应商品，一单可含多件</span>
+    <div v-if="!readonly" class="toolbar">
+      <el-button type="primary" plain :loading="syncing" @click="handleSyncFromOrders()">同步物流</el-button>
+      <span class="hint">自营发货会回传订单中心并扣仓储库存；也可「回传单号」单独补传</span>
     </div>
+
+    <el-table :data="soGroupRows" border stripe class="so-group-table" row-key="key">
+      <el-table-column label="销售单" width="160" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.group.refOrderNo }}</template>
+      </el-table-column>
+      <el-table-column label="规格" min-width="220" show-overflow-tooltip>
+        <template #default="{ row }">{{ formatSpecLabel(row.line.skuSpecs, row.line.qty) }}</template>
+      </el-table-column>
+      <el-table-column label="待发" width="80" align="center">
+        <template #default="{ row }">
+          <span :class="{ muted: row.line.remaining <= 0 }">{{ row.line.remaining }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="状态" width="100" align="center">
+        <template #default="{ row }">{{ row.lineStatus }}</template>
+      </el-table-column>
+      <el-table-column v-if="!readonly" label="操作" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-button
+            type="primary"
+            link
+            :disabled="row.group.remainingQty <= 0"
+            @click="openCreateDropship(row.group)"
+          >
+            发货
+          </el-button>
+          <el-button
+            type="success"
+            link
+            :disabled="!row.group.refSoId"
+            @click="openCallback(row.group)"
+          >
+            回传单号
+          </el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
+    <h4 class="section-title">发货批次</h4>
 
     <el-table :data="list" border stripe>
       <el-table-column prop="shipmentNo" label="批次号" width="140" />
-      <el-table-column v-if="isDropship" label="销售单" width="150" show-overflow-tooltip>
+      <el-table-column label="销售单" width="150" show-overflow-tooltip>
         <template #default="{ row }">{{ shipmentSalesOrders(row) }}</template>
       </el-table-column>
       <el-table-column label="状态" width="90">
@@ -620,6 +606,20 @@ const activeGroup = computed(() =>
       </el-table-column>
       <el-table-column prop="carrierName" label="快递" width="100" />
       <el-table-column prop="trackingNo" label="物流单号" min-width="140" />
+      <el-table-column label="回传" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.callbackOk ? 'success' : 'warning'">
+            {{ row.callbackOk ? '成功' : '待回传' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="扣库" width="80" align="center">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.stockDeducted ? 'success' : 'info'">
+            {{ row.stockDeducted ? '已扣' : '未扣' }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="发货照片" width="140">
         <template #default="{ row }">
           <div v-if="photosByShipment.get(row.id)?.length" class="shots">
@@ -655,9 +655,9 @@ const activeGroup = computed(() =>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="720px">
+    <el-dialog v-model="dialogVisible" title="按销售单发货" width="720px">
       <el-form v-loading="loadingAddr" :model="form" label-width="90px">
-        <el-form-item v-if="isDropship && activeGroup" label="销售单">
+        <el-form-item v-if="activeGroup" label="销售单">
           <span>{{ activeGroup.refOrderNo }}</span>
         </el-form-item>
         <el-form-item label="快递公司" required>
@@ -680,24 +680,19 @@ const activeGroup = computed(() =>
           </el-select>
         </el-form-item>
         <el-form-item label="物流单号" required>
-          <el-input v-model="form.trackingNo" :placeholder="isDropship ? '填写该销售单对应物流单号' : '与下方勾选商品对应'" />
+          <el-input v-model="form.trackingNo" placeholder="填写该销售单对应物流单号" />
         </el-form-item>
         <el-form-item label="发货照片">
           <ScanImageUpload
             v-model="pendingPhotoUrls"
-            subdir="po/shipments"
+            subdir="self/shipments"
             tip="本机上传"
             scan-title="手机扫码上传发货/单号照片"
           />
           <div class="hint" style="margin-top: 6px">可上传发货记录、物流面单/单号照片等</div>
         </el-form-item>
-        <el-form-item :label="isDropship ? '发货明细' : '发货商品'" required>
+        <el-form-item label="发货明细" required>
           <el-table :data="linePicks" border size="small" max-height="280">
-            <el-table-column v-if="!isDropship" width="48" align="center">
-              <template #default="{ row }">
-                <el-checkbox v-model="row.selected" :disabled="row.remaining <= 0" />
-              </template>
-            </el-table-column>
             <el-table-column label="图片" width="56" align="center">
               <template #default="{ row }">
                 <el-image
@@ -757,9 +752,7 @@ const activeGroup = computed(() =>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="handleSave">
-          {{ isDropship ? '发货并回传' : '保存' }}
-        </el-button>
+        <el-button type="primary" :loading="saving" @click="handleSave">发货并回传</el-button>
       </template>
     </el-dialog>
 
@@ -793,7 +786,7 @@ const activeGroup = computed(() =>
         <el-form-item label="备注">
           <el-input v-model="callbackForm.remark" />
         </el-form-item>
-        <div class="hint">已自动带出本单物流（如有）；将写入订单中心并回传快递助手手动发货</div>
+        <div class="hint">已自动带出本单物流（如有）；将写入订单中心并回传电商平台</div>
       </el-form>
       <template #footer>
         <el-button @click="callbackVisible = false">取消</el-button>
@@ -807,7 +800,7 @@ const activeGroup = computed(() =>
       </div>
       <ScanImageUpload
         v-model="photoUrls"
-        subdir="po/shipments"
+        subdir="self/shipments"
         tip="本机上传"
         scan-title="手机扫码上传发货/单号照片"
       />

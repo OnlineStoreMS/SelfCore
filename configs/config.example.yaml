@@ -16,6 +16,8 @@ auth:
 integrations:
   productcore_api_url: "http://127.0.0.1:8090"
   ordercore_api_url: "http://127.0.0.1:8098"
+  warehousecore_api_url: "http://127.0.0.1:8095"
+  shippingcore_api_url: "http://127.0.0.1:8096"
 
 storage:
   # local：public_base_url 用 API 自身，如 http://127.0.0.1:8103/uploads

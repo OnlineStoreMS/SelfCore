@@ -12,6 +12,7 @@ type DashboardStats struct {
 }
 
 type DashboardWorkbench struct {
+	SelfOrderPO       int64 `json:"selfOrderPO"`
 	DropshipPO        int64 `json:"dropshipPO"`
 	WholesalePO         int64 `json:"wholesalePO"`
 	DraftPO           int64 `json:"draftPO"`
@@ -20,10 +21,18 @@ type DashboardWorkbench struct {
 	InTransitPO       int64 `json:"inTransitPO"`
 	PartialReceivedPO int64 `json:"partialReceivedPO"`
 	ActiveOffers      int64 `json:"activeOffers"`
-	// 今日代发毛利：仅 total_amount > 0；毛利润 = sale_amount - total_amount
-	TodayDropshipSaleAmount     float64 `json:"todayDropshipSaleAmount"`
-	TodayDropshipWholesaleAmount float64 `json:"todayDropshipWholesaleAmount"`
-	TodayDropshipProfit         float64 `json:"todayDropshipProfit"`
+	// 今日毛利：仅成本额 > 0 的订单；毛利润 = 有成本销售额 − 成本额
+	TodayDropshipSaleAmount      float64 `json:"todayDropshipSaleAmount"`      // 有成本订单的销售额（tip 用）
+	TodayDropshipWholesaleAmount float64 `json:"todayDropshipWholesaleAmount"` // 有成本订单的成本额
+	TodayDropshipProfit          float64 `json:"todayDropshipProfit"`          // 今日毛利润（成本为 0 不计入）
+	// 今日分销销售额：全部分销类型（直发用 sale_amount，批发用 total_amount）
+	TodayDistSaleAmount float64 `json:"todayDistSaleAmount"`
+	// 今日 / 近7日 / 本月自营销售额
+	TodaySelfSaleAmount float64 `json:"todaySelfSaleAmount"`
+	WeekSelfSaleAmount  float64 `json:"weekSelfSaleAmount"`
+	MonthSelfSaleAmount float64 `json:"monthSelfSaleAmount"`
+	// 本月分销销售额
+	MonthDistSaleAmount float64 `json:"monthDistSaleAmount"`
 }
 
 type DashboardDistributorStats struct {
@@ -64,21 +73,23 @@ type DashboardStatusCount struct {
 	Count  int64  `json:"count"`
 }
 
-// DashboardTrend 代发趋势（按采购业务日）
+// DashboardTrend 全类型趋势（自营+全部分销，按业务日）
 type DashboardTrend struct {
-	StartDate      string                `json:"startDate"`
-	EndDate        string                `json:"endDate"`
-	OrderCount     int64                 `json:"orderCount"`
-	SaleAmount     float64               `json:"saleAmount"`
-	WholesaleAmount float64               `json:"wholesaleAmount"`
-	Profit         float64               `json:"profit"`
-	Points         []DashboardTrendPoint `json:"points"`
+	StartDate       string                `json:"startDate"`
+	EndDate         string                `json:"endDate"`
+	OrderCount      int64                 `json:"orderCount"`      // 区间订单量（自营+分销）
+	SaleAmount      float64               `json:"saleAmount"`      // 区间销售额
+	WholesaleAmount float64               `json:"wholesaleAmount"` // 区间成本额
+	Profit          float64               `json:"profit"`          // 区间毛利润
+	Points          []DashboardTrendPoint `json:"points"`
 }
 
 type DashboardTrendPoint struct {
-	Date           string  `json:"date"`
-	OrderCount     int64   `json:"orderCount"`
-	SaleAmount     float64 `json:"saleAmount"`
-	WholesaleAmount float64 `json:"wholesaleAmount"`
-	Profit         float64 `json:"profit"`
+	Date            string  `json:"date"`
+	SelfOrderCount  int64   `json:"selfOrderCount"`  // 自营单量（图1）
+	SelfSaleAmount  float64 `json:"selfSaleAmount"`  // 自营销售额（图1）
+	OrderCount      int64   `json:"orderCount"`      // 全日订单量（自营+分销）
+	SaleAmount      float64 `json:"saleAmount"`      // 全日销售额
+	WholesaleAmount float64 `json:"wholesaleAmount"` // 全日成本额
+	Profit          float64 `json:"profit"`          // 全日毛利润
 }

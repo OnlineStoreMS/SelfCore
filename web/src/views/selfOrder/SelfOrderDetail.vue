@@ -1,0 +1,444 @@
+<script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
+import {
+  getSelfOrder,
+  listSelfShipments,
+  retryCallback,
+  retryStock,
+  cancelSelfOrder,
+  bindInvSku,
+  searchWarehouseSkus,
+  SELF_ORDER_STATUS_MAP,
+  type SelfOrderDetail,
+  type SelfOrderItem,
+  type WarehouseSku,
+} from '../../api/selfOrder'
+import type { SelfShipment } from '../../api/selfOrderTracking'
+import SelfShipmentTab from './SelfShipmentTab.vue'
+import { orderCoreOrderUrl } from '../../utils/runtimeConfig'
+
+const route = useRoute()
+const router = useRouter()
+const soId = computed(() => Number(route.params.id))
+const activeTab = ref('overview')
+
+const loading = ref(false)
+const acting = ref(false)
+const order = ref<SelfOrderDetail | null>(null)
+const shipments = ref<SelfShipment[]>([])
+
+const bindDialogVisible = ref(false)
+const bindSearching = ref(false)
+const bindSaving = ref(false)
+const bindKeyword = ref('')
+const bindResults = ref<WarehouseSku[]>([])
+const bindTargetItem = ref<SelfOrderItem | null>(null)
+
+function statusLabel(s: string) {
+  return SELF_ORDER_STATUS_MAP[s]?.label || s
+}
+
+function statusType(s: string) {
+  return SELF_ORDER_STATUS_MAP[s]?.type || 'info'
+}
+
+function openOrderCore(id?: number) {
+  const target = id && id > 0 ? id : order.value?.refSoId
+  if (!target) return
+  window.open(orderCoreOrderUrl(target), '_blank', 'noopener,noreferrer')
+}
+
+/** 商品明细行 → 关联物流单号（与 SupplyCore 一致） */
+const logisticsByItem = computed(() => {
+  const map = new Map<number, string[]>()
+  for (const sh of shipments.value) {
+    const tracking = [sh.carrierName, sh.trackingNo].filter(Boolean).join(' ')
+    if (!tracking) continue
+    for (const it of sh.items || []) {
+      const arr = map.get(it.selfOrderItemId) || []
+      if (!arr.includes(tracking)) arr.push(tracking)
+      map.set(it.selfOrderItemId, arr)
+    }
+  }
+  return map
+})
+
+const canRetryStock = computed(() => {
+  if (!order.value) return false
+  if (order.value.stockDeducted) return false
+  const hasCallbackOk = shipments.value.some((s) => s.callbackOk)
+  return hasCallbackOk && (!!order.value.stockError || ['partial_shipped', 'shipped'].includes(order.value.status))
+})
+
+const canCancel = computed(() => {
+  if (!order.value) return false
+  return order.value.status === 'confirmed'
+})
+
+async function loadData() {
+  loading.value = true
+  try {
+    order.value = await getSelfOrder(soId.value)
+    shipments.value = await listSelfShipments(soId.value) as SelfShipment[]
+  } catch (e) {
+    ElMessage.error((e as Error).message || '加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadData)
+
+async function handleRetryStock() {
+  acting.value = true
+  try {
+    order.value = await retryStock(soId.value)
+    ElMessage.success('扣库成功')
+  } catch (e) {
+    ElMessage.error((e as Error).message || '扣库失败')
+    await loadData()
+  } finally {
+    acting.value = false
+  }
+}
+
+async function handleRetryCallback(shipmentId?: number) {
+  acting.value = true
+  try {
+    order.value = await retryCallback(soId.value, shipmentId)
+    shipments.value = await listSelfShipments(soId.value) as SelfShipment[]
+    if (order.value.stockError) {
+      ElMessage.warning(`已回传订单中心，但扣库失败：${order.value.stockError}，可重试扣库`)
+    } else if (order.value.stockDeducted) {
+      ElMessage.success('已回传订单中心并扣减仓储库存')
+    } else {
+      ElMessage.success('已回传订单中心')
+    }
+  } catch (e) {
+    ElMessage.error((e as Error).message || '回传失败')
+  } finally {
+    acting.value = false
+  }
+}
+
+const pendingCallbackShipment = computed(() =>
+  shipments.value.find((s) => !s.callbackOk && !!s.trackingNo),
+)
+
+const canRetryCallback = computed(() => !!pendingCallbackShipment.value)
+
+async function handleCancel() {
+  try {
+    await ElMessageBox.confirm('确定取消此自营单？', '确认')
+  } catch {
+    return
+  }
+  acting.value = true
+  try {
+    order.value = await cancelSelfOrder(soId.value)
+    ElMessage.success('已取消')
+  } catch (e) {
+    ElMessage.error((e as Error).message || '取消失败')
+  } finally {
+    acting.value = false
+  }
+}
+
+function openBindDialog(row: SelfOrderItem) {
+  bindTargetItem.value = row
+  bindKeyword.value = ''
+  bindResults.value = []
+  bindDialogVisible.value = true
+}
+
+async function searchBindSkus() {
+  bindSearching.value = true
+  try {
+    const data = await searchWarehouseSkus({
+      keyword: bindKeyword.value.trim() || undefined,
+      page: 1,
+      pageSize: 20,
+    })
+    bindResults.value = data.list || []
+  } catch (e) {
+    ElMessage.error((e as Error).message || '搜索失败')
+  } finally {
+    bindSearching.value = false
+  }
+}
+
+async function confirmBindSku(sku: WarehouseSku) {
+  if (!bindTargetItem.value?.id) return
+  bindSaving.value = true
+  try {
+    order.value = await bindInvSku(bindTargetItem.value.id, {
+      invSkuId: sku.id,
+      invSkuCode: sku.skuCode,
+      costUnitPrice: sku.lastPurchasePrice,
+    })
+    bindDialogVisible.value = false
+    ElMessage.success('已绑定库存 SKU')
+  } catch (e) {
+    ElMessage.error((e as Error).message || '绑定失败')
+  } finally {
+    bindSaving.value = false
+  }
+}
+</script>
+
+<template>
+  <div v-loading="loading" class="so-detail">
+    <div class="top-bar">
+      <el-button :icon="ArrowLeft" text @click="router.push('/self-orders')">返回列表</el-button>
+      <div v-if="order" class="actions">
+        <el-button
+          v-if="canRetryCallback"
+          type="warning"
+          plain
+          :loading="acting"
+          @click="handleRetryCallback(pendingCallbackShipment?.id)"
+        >重试回传</el-button>
+        <el-button
+          v-if="canRetryStock"
+          type="warning"
+          plain
+          :loading="acting"
+          @click="handleRetryStock"
+        >重试扣库</el-button>
+        <el-button
+          v-if="canCancel"
+          type="danger"
+          plain
+          :loading="acting"
+          @click="handleCancel"
+        >取消</el-button>
+      </div>
+    </div>
+
+    <el-card v-if="order">
+      <template #header>
+        <div class="header-row">
+          <span>{{ order.soNo }}</span>
+          <el-tag :type="statusType(order.status)">{{ statusLabel(order.status) }}</el-tag>
+        </div>
+      </template>
+
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="基本信息" name="overview">
+          <el-alert
+            v-if="order.stockError"
+            type="error"
+            :title="`扣库失败：${order.stockError}`"
+            show-icon
+            :closable="false"
+            class="stock-alert"
+          />
+
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="自营单号">{{ order.soNo }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag size="small" :type="statusType(order.status)">{{ statusLabel(order.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="仓库">{{ order.warehouseId || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="扣库">
+              <el-tag v-if="order.stockDeducted" size="small" type="success">已扣库</el-tag>
+              <el-tag v-else-if="order.stockError" size="small" type="danger">失败</el-tag>
+              <span v-else class="muted">未扣</span>
+              <el-button
+                v-if="canRetryStock"
+                link
+                type="warning"
+                size="small"
+                :loading="acting"
+                class="retry-btn"
+                @click="handleRetryStock"
+              >重试</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="销售单号">
+              <el-link
+                v-if="order.refSoId || order.refTraceId"
+                type="primary"
+                @click="openOrderCore()"
+              >{{ order.refTraceId || `#${order.refSoId}` }}</el-link>
+              <span v-else>—</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="销售金额">
+              ¥{{ Number(order.saleAmount || 0).toFixed(2) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="成本金额">
+              ¥{{ Number(order.costAmount || 0).toFixed(2) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="买家">{{ order.buyerName || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="手机">{{ order.buyerPhone || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="地址" :span="2">{{ order.address || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="下单时间">{{ order.orderedAt || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="发货时间">{{ order.shippedAt || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="备注" :span="2">{{ order.remark || '—' }}</el-descriptions-item>
+          </el-descriptions>
+
+          <h4 class="section-title">商品明细</h4>
+          <el-table :data="order.items" border stripe>
+            <el-table-column label="图片" width="72" align="center">
+              <template #default="{ row }">
+                <el-image
+                  v-if="row.picUrl"
+                  :src="row.picUrl"
+                  :preview-src-list="[row.picUrl]"
+                  fit="cover"
+                  style="width: 40px; height: 40px; border-radius: 4px"
+                  preview-teleported
+                />
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="销售单" width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span
+                  v-if="row.refSoId"
+                  class="link-text"
+                  @click="openOrderCore(row.refSoId)"
+                >{{ row.refOrderNo || `#${row.refSoId}` }}</span>
+                <span v-else>{{ row.refOrderNo || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="规格" min-width="240" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.skuSpecs || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="库存 SKU" width="160">
+              <template #default="{ row }">
+                <span v-if="row.invSkuCode">{{ row.invSkuCode }}</span>
+                <el-button v-else link type="primary" size="small" @click="openBindDialog(row)">
+                  绑定
+                </el-button>
+              </template>
+            </el-table-column>
+            <el-table-column prop="qty" label="数量" width="70" align="center" />
+            <el-table-column label="实付金额" width="100" align="right">
+              <template #default="{ row }">
+                <span v-if="row.saleAmount > 0">¥{{ Number(row.saleAmount).toFixed(2) }}</span>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="成本单价" width="100" align="right">
+              <template #default="{ row }">¥{{ Number(row.costUnitPrice || 0).toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="成本小计" width="100" align="right">
+              <template #default="{ row }">¥{{ Number(row.costAmount || 0).toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="物流" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <template v-if="row.id && logisticsByItem.get(row.id)?.length">
+                  <div v-for="t in logisticsByItem.get(row.id)" :key="t">{{ t }}</div>
+                </template>
+                <span v-else class="muted">未发货</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="物流" name="shipments">
+          <el-alert
+            v-if="canRetryCallback"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="stock-alert"
+            title="本地物流已登记，订单中心回传未成功，请重试回传；回传成功后会自动扣库"
+          />
+          <el-alert
+            v-else-if="order.stockError"
+            type="error"
+            :title="`已回传订单中心，扣库失败可重试：${order.stockError}`"
+            show-icon
+            :closable="false"
+            class="stock-alert"
+          />
+          <SelfShipmentTab
+            v-if="order"
+            :self-order-id="soId"
+            :order="order"
+            :readonly="order.status === 'cancelled'"
+            @refresh="loadData"
+          />
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
+
+    <el-dialog v-model="bindDialogVisible" title="绑定库存 SKU" width="520px" destroy-on-close>
+      <el-form @submit.prevent="searchBindSkus">
+        <el-form-item label="关键词">
+          <div class="bind-search">
+            <el-input v-model="bindKeyword" clearable placeholder="SKU 编码 / 名称" @keyup.enter="searchBindSkus" />
+            <el-button type="primary" :loading="bindSearching" @click="searchBindSkus">搜索</el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <el-table v-loading="bindSearching" :data="bindResults" border stripe max-height="320">
+        <el-table-column prop="skuCode" label="编码" width="120" />
+        <el-table-column label="名称" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.name || row.pickName || '—' }}</template>
+        </el-table-column>
+        <el-table-column label="最近进价" width="100" align="right">
+          <template #default="{ row }">¥{{ Number(row.lastPurchasePrice || 0).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" align="center">
+          <template #default="{ row }">
+            <el-button link type="primary" :loading="bindSaving" @click="confirmBindSku(row)">选择</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped>
+.so-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+}
+.section-title {
+  margin: 20px 0 12px;
+  font-size: 15px;
+}
+.stock-alert {
+  margin-bottom: 16px;
+}
+.muted {
+  color: #c0c4cc;
+}
+.link-text {
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.retry-btn {
+  margin-left: 8px;
+}
+.bind-search {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+</style>

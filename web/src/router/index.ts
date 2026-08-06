@@ -32,11 +32,12 @@ const router = createRouter({
       children: [
         { path: 'dashboard', name: 'Dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '工作台' } },
         { path: 'self-orders', name: 'SelfOrderList', component: () => import('../views/selfOrder/SelfOrderList.vue'), meta: { title: '自营订单' } },
+        { path: 'self-orders/:id(\\d+)', name: 'SelfOrderDetail', component: () => import('../views/selfOrder/SelfOrderDetail.vue'), meta: { title: '自营订单详情' } },
         {
           path: 'dist-orders/dropship',
           name: 'DropshipOrderList',
           component: () => import('../views/distOrder/DistOrderList.vue'),
-          meta: { title: '代发订单', fulfillmentType: 'dropship' },
+          meta: { title: '分销直发', fulfillmentType: 'dropship' },
         },
         {
           path: 'dist-orders/wholesale',
@@ -71,9 +72,8 @@ router.beforeEach(async (to) => {
   return true
 })
 
-router.afterEach((to) => {
-  const page = to.meta.title as string | undefined
-  document.title = page ? `${page} - ${APP_TITLE}` : APP_TITLE
+router.afterEach(() => {
+  document.title = APP_TITLE
 })
 
 export default router

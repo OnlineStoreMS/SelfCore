@@ -23,14 +23,26 @@ func NewOrderHandler(oc *ordercore.Client) *OrderHandler {
 }
 
 func (h *OrderHandler) Search(c *gin.Context) {
-	keyword := strings.TrimSpace(c.Query("keyword"))
-	if keyword == "" {
-		response.Fail(c, http.StatusBadRequest, "请输入订单号搜索")
-		return
-	}
 	page, pageSize := httputil.ParsePage(c)
 	auth := c.GetHeader("Authorization")
-	list, total, err := h.oc.SearchOrders(c.Request.Context(), auth, keyword, page, pageSize)
+	q := ordercore.OrderListQuery{
+		SourceChannel:  strings.TrimSpace(c.Query("sourceChannel")),
+		Status:         strings.TrimSpace(c.Query("status")),
+		ShipStatus:     strings.TrimSpace(c.Query("shipStatus")),
+		AllocType:      strings.TrimSpace(c.Query("allocType")),
+		Keyword:        strings.TrimSpace(c.Query("keyword")),
+		Platform:       strings.TrimSpace(c.Query("platform")),
+		SalesChannel:   strings.TrimSpace(c.Query("salesChannel")),
+		OrderedAtStart: strings.TrimSpace(c.Query("orderedAtStart")),
+		OrderedAtEnd:   strings.TrimSpace(c.Query("orderedAtEnd")),
+		ShippedAtStart: strings.TrimSpace(c.Query("shippedAtStart")),
+		ShippedAtEnd:   strings.TrimSpace(c.Query("shippedAtEnd")),
+		PayTimeStart:   strings.TrimSpace(c.Query("payTimeStart")),
+		PayTimeEnd:     strings.TrimSpace(c.Query("payTimeEnd")),
+		Page:           page,
+		PageSize:       pageSize,
+	}
+	list, total, err := h.oc.ListOrders(c.Request.Context(), auth, q)
 	if err != nil {
 		response.Fail(c, http.StatusBadGateway, err.Error())
 		return

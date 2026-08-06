@@ -31,4 +31,11 @@ const (
 	AttachmentTypeShipmentPhoto     = "shipment_photo" // 发货记录 / 物流单号照片等
 	AttachmentTypeContract          = "contract"
 	AttachmentTypeOther             = "other"
+
+	// 自营订单状态
+	SelfOrderStatusConfirmed      = "confirmed"
+	SelfOrderStatusPartialShipped = "partial_shipped"
+	SelfOrderStatusShipped        = "shipped"
+	SelfOrderStatusCompleted      = "completed"
+	SelfOrderStatusCancelled      = "cancelled"
 )

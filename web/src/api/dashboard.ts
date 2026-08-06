@@ -2,6 +2,7 @@ import client, { unwrap } from './client'
 import type { DistOrderListItem } from './distOrder'
 
 export interface DashboardWorkbench {
+  selfOrderPO: number
   dropshipPO: number
   wholesalePO: number
   draftPO: number
@@ -13,6 +14,11 @@ export interface DashboardWorkbench {
   todayDropshipSaleAmount: number
   todayDropshipWholesaleAmount: number
   todayDropshipProfit: number
+  todayDistSaleAmount: number
+  todaySelfSaleAmount: number
+  weekSelfSaleAmount: number
+  monthSelfSaleAmount: number
+  monthDistSaleAmount: number
 }
 
 export interface DashboardDistributorStats {
@@ -69,6 +75,8 @@ export async function fetchDashboardStats() {
 
 export interface DashboardTrendPoint {
   date: string
+  selfOrderCount: number
+  selfSaleAmount: number
   orderCount: number
   saleAmount: number
   wholesaleAmount: number

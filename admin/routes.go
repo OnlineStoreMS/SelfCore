@@ -2,7 +2,7 @@ package admin
 
 import "github.com/gin-gonic/gin"
 
-func RegisterRoutes(g *gin.RouterGroup, distributorH *DistributorHandler, priceH *PriceHandler, doH *DistOrderHandler, trackH *TrackingHandler, skuH *ProductSkuHandler, dashH *DashboardHandler, orderH *OrderHandler) {
+func RegisterRoutes(g *gin.RouterGroup, distributorH *DistributorHandler, priceH *PriceHandler, doH *DistOrderHandler, trackH *TrackingHandler, skuH *ProductSkuHandler, dashH *DashboardHandler, orderH *OrderHandler, selfOrderH *SelfOrderHandler, whH *WarehouseHandler) {
 	g.GET("/dashboard/stats", dashH.Stats)
 	g.GET("/dashboard/trend", dashH.Trend)
 
@@ -10,6 +10,28 @@ func RegisterRoutes(g *gin.RouterGroup, distributorH *DistributorHandler, priceH
 	g.POST("/orders/decrypt", orderH.Decrypt)
 	g.GET("/orders/:id", orderH.Get)
 	g.POST("/orders/:id/ship", orderH.Ship)
+
+	g.GET("/self-orders", selfOrderH.List)
+	g.POST("/self-orders", selfOrderH.Create)
+	g.POST("/self-orders/cancel-by-ref-so", selfOrderH.CancelByRefSo)
+	g.GET("/self-orders/:id", selfOrderH.Get)
+	g.DELETE("/self-orders/:id", selfOrderH.Delete)
+	g.POST("/self-orders/:id/ship", selfOrderH.Ship)
+	g.POST("/self-orders/:id/retry-callback", selfOrderH.RetryCallback)
+	g.POST("/self-orders/:id/retry-stock", selfOrderH.RetryStock)
+	g.POST("/self-orders/:id/cancel", selfOrderH.Cancel)
+	g.GET("/self-orders/:id/shipments", selfOrderH.ListShipments)
+	g.POST("/self-orders/:id/shipments", selfOrderH.CreateShipment)
+	g.POST("/self-orders/:id/shipments/sync-from-orders", selfOrderH.SyncShipmentsFromOrders)
+	g.PATCH("/self-orders/:id/shipments/:shipmentId/status", selfOrderH.UpdateShipmentStatus)
+	g.DELETE("/self-orders/:id/shipments/:shipmentId", selfOrderH.DeleteShipment)
+	g.GET("/self-orders/:id/attachments", selfOrderH.ListAttachments)
+	g.POST("/self-orders/:id/attachments", selfOrderH.CreateAttachment)
+	g.DELETE("/self-orders/:id/attachments/:attachmentId", selfOrderH.DeleteAttachment)
+	g.PUT("/self-order-items/:itemId/inv-sku", selfOrderH.BindInvSku)
+
+	g.GET("/warehouse-skus/search", whH.SearchSkus)
+	g.GET("/warehouses", whH.ListWarehouses)
 
 	g.GET("/distributor-categories", distributorH.ListCategories)
 	g.POST("/distributor-categories", distributorH.CreateCategory)

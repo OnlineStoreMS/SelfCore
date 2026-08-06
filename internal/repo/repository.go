@@ -11,6 +11,7 @@ type Repos struct {
 	Payment             *ReceiptRepo
 	Attachment          *AttachmentRepo
 	Dashboard           *DashboardRepo
+	SelfOrder           *SelfOrderRepo
 }
 
 func New(db *gorm.DB) *Repos {
@@ -23,5 +24,6 @@ func New(db *gorm.DB) *Repos {
 		Payment:             NewReceiptRepo(db),
 		Attachment:          NewAttachmentRepo(db),
 		Dashboard:           NewDashboardRepo(db),
+		SelfOrder:           NewSelfOrderRepo(db),
 	}
 }
