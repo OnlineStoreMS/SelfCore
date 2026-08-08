@@ -9,6 +9,8 @@ export interface SelfOrderListItem {
   refTraceId: string
   saleAmount: number
   costAmount: number
+  payStatus?: string
+  paidAt?: string
   sourceChannel?: string
   platform?: string
   shopName?: string
@@ -53,6 +55,8 @@ export interface SelfOrderDetail {
   refTraceId: string
   saleAmount: number
   costAmount: number
+  payStatus?: string
+  paidAt?: string
   buyerName: string
   buyerPhone: string
   address: string
@@ -128,8 +132,11 @@ export const SELF_ORDER_STATUS_MAP: Record<
   string,
   { label: string; type: '' | 'success' | 'warning' | 'info' | 'danger' }
 > = {
-  confirmed: { label: '待发货', type: 'warning' },
-  partial_shipped: { label: '部分发货', type: '' },
+  draft: { label: '草稿', type: 'info' },
+  ordered: { label: '已下单', type: 'warning' },
+  confirmed: { label: '已下单', type: 'warning' }, // 兼容旧数据
+  paid: { label: '已付款', type: '' },
+  partial_shipped: { label: '部分发货', type: 'warning' },
   shipped: { label: '已发货', type: 'success' },
   completed: { label: '已完成', type: 'success' },
   cancelled: { label: '已取消', type: 'info' },
@@ -144,6 +151,7 @@ export async function listSelfOrders(params: {
   status?: string
   statuses?: string
   excludeStatuses?: string
+  payStatus?: string
   shipStatus?: string
   refSoId?: number
   keyword?: string
@@ -178,6 +186,18 @@ export async function retryStock(id: number) {
   return unwrap<SelfOrderDetail>(await client.post(`/self-orders/${id}/retry-stock`))
 }
 
+export async function submitSelfOrder(id: number) {
+  return unwrap<SelfOrderDetail>(await client.post(`/self-orders/${id}/submit`))
+}
+
+export async function markSelfOrderPaid(id: number) {
+  return unwrap<SelfOrderDetail>(await client.post(`/self-orders/${id}/mark-paid`))
+}
+
+export async function completeSelfOrder(id: number) {
+  return unwrap<SelfOrderDetail>(await client.post(`/self-orders/${id}/complete`))
+}
+
 export async function cancelSelfOrder(id: number) {
   return unwrap<SelfOrderDetail>(await client.post(`/self-orders/${id}/cancel`))
 }
@@ -188,6 +208,10 @@ export async function deleteSelfOrder(id: number) {
 
 export async function bindInvSku(itemId: number, data: BindInvSkuInput) {
   return unwrap<SelfOrderDetail>(await client.put(`/self-order-items/${itemId}/inv-sku`, data))
+}
+
+export async function updateItemCost(itemId: number, costUnitPrice: number) {
+  return unwrap<SelfOrderDetail>(await client.put(`/self-order-items/${itemId}/cost`, { costUnitPrice }))
 }
 
 export async function listSelfShipments(selfOrderId: number) {

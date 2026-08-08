@@ -40,12 +40,33 @@ func (s *DashboardService) Stats() (*dto.DashboardStats, error) {
 		model.DistStatusPartialShipped,
 		model.DistStatusShipped,
 	}
+	selfWaitShipStatuses := []string{
+		model.SelfOrderStatusOrdered,
+		model.SelfOrderStatusPaid,
+		model.SelfOrderStatusConfirmed,
+	}
+	distWaitShipStatuses := []string{
+		model.DistStatusConfirmed,
+		model.DistStatusPaid,
+	}
 
 	out := &dto.DashboardStats{}
 
 	var err error
-	// 工作场景默认按今日业务日统计
+	// 工作场景 · 今日：第一行自营 / 第二行分销
 	if out.Workbench.SelfOrderPO, err = r.CountSelfOrdersSince(&today, true); err != nil {
+		return nil, err
+	}
+	if out.Workbench.SelfUnpaidPO, err = r.CountUnpaidSelfOrdersSince(&today); err != nil {
+		return nil, err
+	}
+	if out.Workbench.SelfDraftPO, err = r.CountSelfOrdersByStatusSince(model.SelfOrderStatusDraft, &today); err != nil {
+		return nil, err
+	}
+	if out.Workbench.SelfWaitShipPO, err = r.CountSelfOrdersByStatusesSince(selfWaitShipStatuses, &today); err != nil {
+		return nil, err
+	}
+	if out.Workbench.DistOrderPO, err = r.CountDistOrdersOnDay(today, true); err != nil {
 		return nil, err
 	}
 	if out.Workbench.DropshipPO, err = r.CountPOsByFulfillmentSince(model.DistFulfillmentDropship, true, &today); err != nil {
@@ -60,7 +81,11 @@ func (s *DashboardService) Stats() (*dto.DashboardStats, error) {
 	if out.Workbench.ConfirmedPO, err = r.CountPOsByStatusSince(model.DistStatusConfirmed, &today); err != nil {
 		return nil, err
 	}
+	out.Workbench.OrderedPO = out.Workbench.ConfirmedPO
 	if out.Workbench.UnpaidPO, err = r.CountUnpaidPOsSince(&today); err != nil {
+		return nil, err
+	}
+	if out.Workbench.DistWaitShipPO, err = r.CountPOsByStatusesSince(distWaitShipStatuses, &today); err != nil {
 		return nil, err
 	}
 	if out.Workbench.InTransitPO, err = r.CountPOsByStatusesSince(shippedStatuses, &today); err != nil {

@@ -3,11 +3,17 @@ import type { DistOrderListItem } from './distOrder'
 
 export interface DashboardWorkbench {
   selfOrderPO: number
+  selfUnpaidPO: number
+  selfDraftPO: number
+  selfWaitShipPO: number
+  distOrderPO: number
   dropshipPO: number
   wholesalePO: number
   draftPO: number
-  confirmedPO: number
   unpaidPO: number
+  distWaitShipPO: number
+  orderedPO?: number
+  confirmedPO: number
   inTransitPO: number
   partialReceivedPO: number
   activeOffers: number

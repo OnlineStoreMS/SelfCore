@@ -218,6 +218,27 @@ type ShipRequest struct {
 	Callback       bool   `json:"callback"`
 }
 
+type UpdatePaymentRequest struct {
+	PayStatus    string  `json:"payStatus"`
+	PayTime      *string `json:"payTime,omitempty"`
+	ClearPayTime bool    `json:"clearPayTime,omitempty"`
+}
+
+// UpdatePayment 回写订单中心付款状态（手工单才会落库）。
+func (c *Client) UpdatePayment(ctx context.Context, bearerToken string, orderID uint64, req UpdatePaymentRequest) error {
+	if orderID == 0 {
+		return fmt.Errorf("order id required")
+	}
+	body := map[string]any{
+		"payStatus":    req.PayStatus,
+		"clearPayTime": req.ClearPayTime,
+	}
+	if req.PayTime != nil {
+		body["payTime"] = *req.PayTime
+	}
+	return c.putJSON(ctx, bearerToken, fmt.Sprintf("/api/v1/admin/orders/%d/payment", orderID), body, nil)
+}
+
 // ShipOrder 调用订单中心填写物流（电商订单可回传 StoreSyncAgent）。
 func (c *Client) ShipOrder(ctx context.Context, bearerToken string, orderID uint64, req ShipRequest) (*OrderBrief, error) {
 	if orderID == 0 {
@@ -299,6 +320,10 @@ func (c *Client) getJSON(ctx context.Context, bearerToken, path string, out any)
 
 func (c *Client) postJSON(ctx context.Context, bearerToken, path string, body any, out any) error {
 	return c.doJSON(ctx, http.MethodPost, bearerToken, path, body, out)
+}
+
+func (c *Client) putJSON(ctx context.Context, bearerToken, path string, body any, out any) error {
+	return c.doJSON(ctx, http.MethodPut, bearerToken, path, body, out)
 }
 
 func (c *Client) doJSON(ctx context.Context, method, bearerToken, path string, body any, out any) error {

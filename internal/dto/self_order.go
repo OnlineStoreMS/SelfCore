@@ -37,7 +37,10 @@ type SelfOrderInput struct {
 	FenFaRemark   string               `json:"fenFaRemark"`
 	PrinterRemark string               `json:"printerRemark"`
 	OrderedAt     string               `json:"orderedAt"`
-	Items         []SelfOrderItemInput `json:"items"`
+	// PayStatus 可选：paid 时创建即为已付款（电商订单由 OrderCore 传入）
+	PayStatus string `json:"payStatus"`
+	PaidAt    string `json:"paidAt"`
+	Items     []SelfOrderItemInput `json:"items"`
 }
 
 type SelfOrderListItem struct {
@@ -49,6 +52,8 @@ type SelfOrderListItem struct {
 	RefTraceID    string  `json:"refTraceId"`
 	SaleAmount    float64 `json:"saleAmount"`
 	CostAmount    float64 `json:"costAmount"`
+	PayStatus     string  `json:"payStatus"`
+	PaidAt        string  `json:"paidAt,omitempty"`
 	SourceChannel string  `json:"sourceChannel"`
 	Platform      string  `json:"platform"`
 	ShopName      string  `json:"shopName"`
@@ -93,6 +98,8 @@ type SelfOrderDetail struct {
 	RefTraceID    string             `json:"refTraceId"`
 	SaleAmount    float64            `json:"saleAmount"`
 	CostAmount    float64            `json:"costAmount"`
+	PayStatus     string             `json:"payStatus"`
+	PaidAt        string             `json:"paidAt,omitempty"`
 	BuyerName     string             `json:"buyerName"`
 	BuyerPhone    string             `json:"buyerPhone"`
 	Address       string             `json:"address"`
@@ -117,6 +124,10 @@ type SelfOrderDetail struct {
 type BindInvSkuInput struct {
 	InvSkuID      uint64  `json:"invSkuId" binding:"required"`
 	InvSkuCode    string  `json:"invSkuCode"`
+	CostUnitPrice float64 `json:"costUnitPrice"`
+}
+
+type UpdateItemCostInput struct {
 	CostUnitPrice float64 `json:"costUnitPrice"`
 }
 
@@ -187,6 +198,7 @@ type SelfShipmentDTO struct {
 }
 
 type SelfAttachmentInput struct {
+	PaymentID  uint64 `json:"paymentId"`
 	ShipmentID uint64 `json:"shipmentId"`
 	FileType   string `json:"fileType" binding:"required"`
 	FileName   string `json:"fileName" binding:"required"`
@@ -197,6 +209,7 @@ type SelfAttachmentInput struct {
 type SelfAttachmentDTO struct {
 	ID          uint64 `json:"id"`
 	SelfOrderID uint64 `json:"selfOrderId"`
+	PaymentID   uint64 `json:"paymentId"`
 	ShipmentID  uint64 `json:"shipmentId"`
 	FileType    string `json:"fileType"`
 	FileName    string `json:"fileName"`
@@ -204,4 +217,29 @@ type SelfAttachmentDTO struct {
 	UploadedBy  uint64 `json:"uploadedBy"`
 	Remark      string `json:"remark"`
 	CreatedAt   string `json:"createdAt"`
+}
+
+type SelfPaymentInput struct {
+	PayAmount    float64 `json:"payAmount" binding:"required"`
+	PayMethod    string  `json:"payMethod"`
+	PayAccount   string  `json:"payAccount"`
+	PayeeAccount string  `json:"payeeAccount"`
+	PayeeName    string  `json:"payeeName"`
+	PayStatus    string  `json:"payStatus"`
+	PaidAt       string  `json:"paidAt"`
+	Remark       string  `json:"remark"`
+}
+
+type SelfPaymentDetail struct {
+	ID           uint64  `json:"id"`
+	SelfOrderID  uint64  `json:"selfOrderId"`
+	PayAmount    float64 `json:"payAmount"`
+	PayMethod    string  `json:"payMethod"`
+	PayAccount   string  `json:"payAccount"`
+	PayeeAccount string  `json:"payeeAccount"`
+	PayeeName    string  `json:"payeeName"`
+	PayStatus    string  `json:"payStatus"`
+	PaidAt       string  `json:"paidAt,omitempty"`
+	Remark       string  `json:"remark"`
+	CreatedAt    string  `json:"createdAt"`
 }

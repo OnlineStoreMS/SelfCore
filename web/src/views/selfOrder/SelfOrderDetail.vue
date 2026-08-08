@@ -8,8 +8,12 @@ import {
   listSelfShipments,
   retryCallback,
   retryStock,
+  submitSelfOrder,
+  markSelfOrderPaid,
+  completeSelfOrder,
   cancelSelfOrder,
   bindInvSku,
+  updateItemCost,
   searchWarehouseSkus,
   SELF_ORDER_STATUS_MAP,
   type SelfOrderDetail,
@@ -18,6 +22,8 @@ import {
 } from '../../api/selfOrder'
 import type { SelfShipment } from '../../api/selfOrderTracking'
 import SelfShipmentTab from './SelfShipmentTab.vue'
+import SelfPaymentTab from './SelfPaymentTab.vue'
+import { SELF_PAY_STATUS_MAP } from '../../api/selfOrderTracking'
 import { orderCoreOrderUrl } from '../../utils/runtimeConfig'
 
 const route = useRoute()
@@ -70,19 +76,29 @@ const canRetryStock = computed(() => {
   if (!order.value) return false
   if (order.value.stockDeducted) return false
   const hasCallbackOk = shipments.value.some((s) => s.callbackOk)
-  return hasCallbackOk && (!!order.value.stockError || ['partial_shipped', 'shipped'].includes(order.value.status))
+  return hasCallbackOk && (!!order.value.stockError || ['partial_shipped', 'shipped', 'completed'].includes(order.value.status))
 })
 
 const canCancel = computed(() => {
   if (!order.value) return false
-  return order.value.status === 'confirmed'
+  return ['draft', 'ordered', 'confirmed'].includes(order.value.status)
 })
+
+const isDraft = computed(() => order.value?.status === 'draft')
+/** 电商订单默认已付款，不展示付款 Tab / 标记付款 */
+const isEcommerce = computed(() => (order.value?.sourceChannel || '').toLowerCase() === 'kdzs')
+const showPaymentTab = computed(() => !!order.value && !isEcommerce.value)
+
+const costSaving = ref(false)
 
 async function loadData() {
   loading.value = true
   try {
     order.value = await getSelfOrder(soId.value)
     shipments.value = await listSelfShipments(soId.value) as SelfShipment[]
+    if (isEcommerce.value && activeTab.value === 'payments') {
+      activeTab.value = 'overview'
+    }
   } catch (e) {
     ElMessage.error((e as Error).message || '加载失败')
   } finally {
@@ -130,21 +146,58 @@ const pendingCallbackShipment = computed(() =>
 
 const canRetryCallback = computed(() => !!pendingCallbackShipment.value)
 
+async function doAction(label: string, fn: () => Promise<SelfOrderDetail>) {
+  acting.value = true
+  try {
+    order.value = await fn()
+    ElMessage.success(`${label}成功`)
+  } catch (e) {
+    ElMessage.error((e as Error).message || `${label}失败`)
+  } finally {
+    acting.value = false
+  }
+}
+
+function itemMissingCost(it: SelfOrderItem) {
+  return !(Number(it.costUnitPrice) > 0 || Number(it.costAmount) > 0)
+}
+
+async function handleSubmit() {
+  if (!order.value) return
+  const missing = (order.value.items || []).filter(itemMissingCost)
+  if (missing.length) {
+    const name = missing[0].skuSpecs || missing[0].productName || '商品'
+    ElMessage.warning(`请先填写成本价或绑定库存 SKU：${name}`)
+    return
+  }
+  await doAction('提交下单', () => submitSelfOrder(soId.value))
+}
+
+async function onCostChange(row: SelfOrderItem, val: number | undefined) {
+  if (!row.id || !isDraft.value) return
+  const price = Number(val)
+  if (Number.isNaN(price) || price < 0) {
+    ElMessage.warning('成本单价不能为负')
+    return
+  }
+  costSaving.value = true
+  try {
+    order.value = await updateItemCost(row.id, price)
+  } catch (e) {
+    ElMessage.error((e as Error).message || '保存成本失败')
+    await loadData()
+  } finally {
+    costSaving.value = false
+  }
+}
+
 async function handleCancel() {
   try {
     await ElMessageBox.confirm('确定取消此自营单？', '确认')
   } catch {
     return
   }
-  acting.value = true
-  try {
-    order.value = await cancelSelfOrder(soId.value)
-    ElMessage.success('已取消')
-  } catch (e) {
-    ElMessage.error((e as Error).message || '取消失败')
-  } finally {
-    acting.value = false
-  }
+  await doAction('取消', () => cancelSelfOrder(soId.value))
 }
 
 function openBindDialog(row: SelfOrderItem) {
@@ -194,6 +247,24 @@ async function confirmBindSku(sku: WarehouseSku) {
     <div class="top-bar">
       <el-button :icon="ArrowLeft" text @click="router.push('/self-orders')">返回列表</el-button>
       <div v-if="order" class="actions">
+        <el-button
+          v-if="order.status === 'draft'"
+          type="primary"
+          :loading="acting"
+          @click="handleSubmit"
+        >提交下单</el-button>
+        <el-button
+          v-if="!isEcommerce && (order.status === 'ordered' || order.status === 'confirmed')"
+          type="warning"
+          :loading="acting"
+          @click="doAction('标记已付款', () => markSelfOrderPaid(soId))"
+        >快捷标记已付款</el-button>
+        <el-button
+          v-if="['paid', 'partial_shipped', 'shipped'].includes(order.status)"
+          type="success"
+          :loading="acting"
+          @click="doAction('完成', () => completeSelfOrder(soId))"
+        >完成</el-button>
         <el-button
           v-if="canRetryCallback"
           type="warning"
@@ -271,6 +342,10 @@ async function confirmBindSku(sku: WarehouseSku) {
             <el-descriptions-item label="成本金额">
               ¥{{ Number(order.costAmount || 0).toFixed(2) }}
             </el-descriptions-item>
+            <el-descriptions-item label="付款状态">
+              {{ SELF_PAY_STATUS_MAP[order.payStatus || 'unpaid'] || order.payStatus || '未付清' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="付款时间">{{ order.paidAt || '—' }}</el-descriptions-item>
             <el-descriptions-item label="买家">{{ order.buyerName || '—' }}</el-descriptions-item>
             <el-descriptions-item label="手机">{{ order.buyerPhone || '—' }}</el-descriptions-item>
             <el-descriptions-item label="地址" :span="2">{{ order.address || '—' }}</el-descriptions-item>
@@ -307,12 +382,19 @@ async function confirmBindSku(sku: WarehouseSku) {
             <el-table-column label="规格" min-width="240" show-overflow-tooltip>
               <template #default="{ row }">{{ row.skuSpecs || '—' }}</template>
             </el-table-column>
-            <el-table-column label="库存 SKU" width="160">
+            <el-table-column label="库存 SKU" width="180">
               <template #default="{ row }">
-                <span v-if="row.invSkuCode">{{ row.invSkuCode }}</span>
-                <el-button v-else link type="primary" size="small" @click="openBindDialog(row)">
-                  绑定
-                </el-button>
+                <div class="inv-sku-cell">
+                  <span v-if="row.invSkuCode">{{ row.invSkuCode }}</span>
+                  <span v-else class="muted">未绑定</span>
+                  <el-button
+                    v-if="isDraft"
+                    link
+                    type="primary"
+                    size="small"
+                    @click="openBindDialog(row)"
+                  >{{ row.invSkuCode ? '更换' : '绑定' }}</el-button>
+                </div>
               </template>
             </el-table-column>
             <el-table-column prop="qty" label="数量" width="70" align="center" />
@@ -322,8 +404,22 @@ async function confirmBindSku(sku: WarehouseSku) {
                 <span v-else class="muted">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="成本单价" width="100" align="right">
-              <template #default="{ row }">¥{{ Number(row.costUnitPrice || 0).toFixed(2) }}</template>
+            <el-table-column label="成本单价" width="130" align="right">
+              <template #default="{ row }">
+                <el-input-number
+                  v-if="isDraft"
+                  :model-value="Number(row.costUnitPrice || 0)"
+                  :min="0"
+                  :precision="2"
+                  :step="0.01"
+                  controls-position="right"
+                  size="small"
+                  style="width: 118px"
+                  :disabled="costSaving"
+                  @change="(v: number | undefined) => onCostChange(row, v)"
+                />
+                <span v-else>¥{{ Number(row.costUnitPrice || 0).toFixed(2) }}</span>
+              </template>
             </el-table-column>
             <el-table-column label="成本小计" width="100" align="right">
               <template #default="{ row }">¥{{ Number(row.costAmount || 0).toFixed(2) }}</template>
@@ -357,8 +453,25 @@ async function confirmBindSku(sku: WarehouseSku) {
             :closable="false"
             class="stock-alert"
           />
+          <el-empty v-if="isDraft" description="提交下单后可登记物流" />
           <SelfShipmentTab
-            v-if="order"
+            v-else-if="order"
+            :self-order-id="soId"
+            :order="order"
+            :readonly="order.status === 'cancelled'"
+            @refresh="loadData"
+          />
+        </el-tab-pane>
+
+        <el-tab-pane
+          v-if="showPaymentTab"
+          label="付款"
+          name="payments"
+          :disabled="order.status === 'cancelled' || isDraft"
+        >
+          <el-empty v-if="isDraft" description="提交下单后可记录付款" />
+          <SelfPaymentTab
+            v-else-if="order"
             :self-order-id="soId"
             :order="order"
             :readonly="order.status === 'cancelled'"
@@ -440,5 +553,11 @@ async function confirmBindSku(sku: WarehouseSku) {
   display: flex;
   gap: 8px;
   width: 100%;
+}
+.inv-sku-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 </style>

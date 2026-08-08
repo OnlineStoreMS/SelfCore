@@ -55,6 +55,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.SelfOrderItem{},
 		&model.SelfShipment{},
 		&model.SelfShipmentItem{},
+		&model.SelfPayment{},
 		&model.SelfAttachment{},
 	); err != nil {
 		return err
@@ -62,6 +63,38 @@ func AutoMigrate(db *gorm.DB) error {
 	_ = db.Exec(`UPDATE distributor_addresses SET address_type = 'ship' WHERE address_type IS NULL OR address_type = ''`).Error
 	_ = db.Exec(`UPDATE dist_orders SET status = 'shipped' WHERE status = 'in_transit'`).Error
 	_ = db.Exec(`UPDATE dist_orders SET status = 'confirmed' WHERE status = 'ordered'`).Error
+	// 自营单：confirmed → 电商默认已付款，其余已下单
+	_ = db.Exec(`
+		UPDATE self_orders
+		SET status = 'paid', pay_status = 'paid',
+		    paid_at = COALESCE(paid_at, ordered_at, created_at)
+		WHERE status = 'confirmed' AND source_channel = 'kdzs'
+	`).Error
+	_ = db.Exec(`
+		UPDATE self_orders SET status = 'paid'
+		WHERE status = 'confirmed' AND pay_status = 'paid'
+	`).Error
+	_ = db.Exec(`UPDATE self_orders SET status = 'ordered' WHERE status = 'confirmed'`).Error
+	// 电商历史单补标已付款（创建时尚无付款态）
+	_ = db.Exec(`
+		UPDATE self_orders
+		SET pay_status = 'paid',
+		    paid_at = COALESCE(paid_at, ordered_at, created_at)
+		WHERE source_channel = 'kdzs'
+		  AND pay_status <> 'paid'
+		  AND status NOT IN ('draft', 'cancelled')
+	`).Error
+	_ = db.Exec(`
+		UPDATE self_orders SET status = 'paid'
+		WHERE source_channel = 'kdzs' AND pay_status = 'paid' AND status = 'ordered'
+	`).Error
+	// 自营无到货环节：历史「已发货」视作已完成
+	_ = db.Exec(`
+		UPDATE self_orders
+		SET status = 'completed',
+		    completed_at = COALESCE(completed_at, shipped_at, updated_at)
+		WHERE status = 'shipped'
+	`).Error
 	return ensureIndexes(db)
 }
 

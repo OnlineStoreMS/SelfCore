@@ -54,11 +54,15 @@ func (s *SelfOrderService) List(f repo.SelfOrderListFilter) ([]dto.SelfOrderList
 			ID: o.ID, SoNo: o.SoNo, Status: o.Status, WarehouseID: o.WarehouseID,
 			RefSoID: o.RefSoID, RefTraceID: o.RefTraceID,
 			SaleAmount: o.SaleAmount, CostAmount: o.CostAmount,
+			PayStatus: firstNonEmpty(o.PayStatus, model.DistPayStatusUnpaid),
 			SourceChannel: o.SourceChannel, Platform: o.Platform, ShopName: o.ShopName,
 			BuyerRemark: o.BuyerRemark, SellerRemark: o.SellerRemark,
 			FenFaRemark: o.FenFaRemark, PrinterRemark: o.PrinterRemark,
 			StockDeducted: o.StockDeducted, StockError: o.StockError,
 			CreatedAt: formatTime(o.CreatedAt),
+		}
+		if o.PaidAt != nil {
+			item.PaidAt = formatTimePtr(o.PaidAt)
 		}
 		if o.OrderedAt != nil {
 			item.OrderedAt = formatTimePtr(o.OrderedAt)
@@ -176,11 +180,13 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 		if err != nil {
 			return nil, err
 		}
+		status, payStatus, paidAt := resolveSelfOrderCreatePay(in)
 		o := &model.SelfOrder{
-			SoNo: soNo, Status: model.SelfOrderStatusConfirmed,
+			SoNo: soNo, Status: status,
 			WarehouseID: warehouseID,
 			RefSoID: in.RefSoID, RefTraceID: strings.TrimSpace(in.RefTraceID),
 			SaleAmount: round2(saleTotal), CostAmount: round2(costTotal),
+			PayStatus: payStatus, PaidAt: paidAt,
 			BuyerName: in.BuyerName, BuyerPhone: in.BuyerPhone, Address: in.Address,
 			Remark: in.Remark,
 			SourceChannel: strings.TrimSpace(in.SourceChannel),
@@ -193,9 +199,17 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 		}
 		if t := parseDateTime(in.OrderedAt); t != nil {
 			o.OrderedAt = t
-		} else {
+		} else if status != model.SelfOrderStatusDraft {
 			now := time.Now()
 			o.OrderedAt = &now
+		}
+		if o.PaidAt == nil && payStatus == model.DistPayStatusPaid {
+			if o.OrderedAt != nil {
+				o.PaidAt = o.OrderedAt
+			} else {
+				now := time.Now()
+				o.PaidAt = &now
+			}
 		}
 		lineItems := make([]model.SelfOrderItem, len(items))
 		copy(lineItems, items)
@@ -223,6 +237,13 @@ func (s *SelfOrderService) BindInvSku(itemID uint64, in *dto.BindInvSkuInput) (*
 	if err != nil {
 		return nil, err
 	}
+	oHead, err := r.GetByID(it.SelfOrderID)
+	if err != nil {
+		return nil, err
+	}
+	if oHead.Status != model.SelfOrderStatusDraft {
+		return nil, fmt.Errorf("仅草稿自营单可绑定库存 SKU")
+	}
 	it.InvSkuID = in.InvSkuID
 	it.InvSkuCode = strings.TrimSpace(in.InvSkuCode)
 	if in.CostUnitPrice > 0 {
@@ -232,7 +253,39 @@ func (s *SelfOrderService) BindInvSku(itemID uint64, in *dto.BindInvSkuInput) (*
 	if err := r.SaveItem(it); err != nil {
 		return nil, err
 	}
-	o, err := r.GetWithItems(it.SelfOrderID)
+	return s.recalcOrderCost(it.SelfOrderID)
+}
+
+func (s *SelfOrderService) UpdateItemCost(itemID uint64, in *dto.UpdateItemCostInput) (*dto.SelfOrderDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	it, err := r.GetItem(itemID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	oHead, err := r.GetByID(it.SelfOrderID)
+	if err != nil {
+		return nil, err
+	}
+	if oHead.Status != model.SelfOrderStatusDraft {
+		return nil, fmt.Errorf("仅草稿自营单可修改成本价")
+	}
+	if in.CostUnitPrice < 0 {
+		return nil, fmt.Errorf("成本单价不能为负")
+	}
+	it.CostUnitPrice = in.CostUnitPrice
+	it.CostAmount = round2(it.CostUnitPrice * float64(it.Qty))
+	if err := r.SaveItem(it); err != nil {
+		return nil, err
+	}
+	return s.recalcOrderCost(it.SelfOrderID)
+}
+
+func (s *SelfOrderService) recalcOrderCost(selfOrderID uint64) (*dto.SelfOrderDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetWithItems(selfOrderID)
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +341,9 @@ func (s *SelfOrderService) CreateShipment(ctx context.Context, bearerToken strin
 	}
 	if o.Status == model.SelfOrderStatusCancelled {
 		return nil, fmt.Errorf("已取消的自营单不能发货")
+	}
+	if o.Status == model.SelfOrderStatusDraft {
+		return nil, fmt.Errorf("草稿自营单请先提交下单再发货")
 	}
 	if o.RefSoID == 0 {
 		return nil, fmt.Errorf("未关联销售单，无法回传订单中心")
@@ -702,6 +758,213 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 	return out, nil
 }
 
+func (s *SelfOrderService) ListPayments(selfOrderID uint64) ([]dto.SelfPaymentDetail, error) {
+	if _, err := s.repos.SelfOrder.ForTenant(s.tenantID).GetByID(selfOrderID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	list, err := s.repos.SelfOrder.ForTenant(s.tenantID).ListPayments(selfOrderID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dto.SelfPaymentDetail, 0, len(list))
+	for i := range list {
+		out = append(out, s.toPaymentDetail(&list[i]))
+	}
+	return out, nil
+}
+
+func (s *SelfOrderService) CreatePayment(ctx context.Context, bearerToken string, selfOrderID uint64, in *dto.SelfPaymentInput) (*dto.SelfPaymentDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetByID(selfOrderID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if o.Status == model.SelfOrderStatusCancelled {
+		return nil, fmt.Errorf("已取消的自营单不能记录付款")
+	}
+	if o.Status == model.SelfOrderStatusDraft {
+		return nil, fmt.Errorf("草稿自营单请先提交下单再记录付款")
+	}
+	if isEcommerceSelfOrder(o) {
+		return nil, fmt.Errorf("电商订单默认已付款，无需再记录付款")
+	}
+	pay := &model.SelfPayment{
+		SelfOrderID:  selfOrderID,
+		PayAmount:    in.PayAmount,
+		PayMethod:    in.PayMethod,
+		PayAccount:   in.PayAccount,
+		PayeeAccount: in.PayeeAccount,
+		PayeeName:    in.PayeeName,
+		PayStatus:    defaultPayRecordStatus(in.PayStatus),
+		Remark:       in.Remark,
+	}
+	if in.PaidAt != "" {
+		if t := parseDateTime(in.PaidAt); t != nil {
+			pay.PaidAt = t
+		}
+	} else if pay.PayStatus == model.DistPayStatusPaid {
+		now := time.Now()
+		pay.PaidAt = &now
+	}
+	if err := r.CreatePayment(pay); err != nil {
+		return nil, err
+	}
+	if err := s.syncPayStatus(ctx, bearerToken, o); err != nil {
+		return nil, err
+	}
+	detail := s.toPaymentDetail(pay)
+	return &detail, nil
+}
+
+func (s *SelfOrderService) UpdatePayment(ctx context.Context, bearerToken string, selfOrderID, paymentID uint64, in *dto.SelfPaymentInput) (*dto.SelfPaymentDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetByID(selfOrderID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if o.Status == model.SelfOrderStatusCancelled {
+		return nil, fmt.Errorf("已取消的自营单不能修改付款")
+	}
+	if o.Status == model.SelfOrderStatusDraft {
+		return nil, fmt.Errorf("草稿自营单请先提交下单再修改付款")
+	}
+	if isEcommerceSelfOrder(o) {
+		return nil, fmt.Errorf("电商订单默认已付款，无需再修改付款")
+	}
+	pay, err := r.GetPayment(selfOrderID, paymentID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	pay.PayAmount = in.PayAmount
+	pay.PayMethod = in.PayMethod
+	pay.PayAccount = in.PayAccount
+	pay.PayeeAccount = in.PayeeAccount
+	pay.PayeeName = in.PayeeName
+	pay.PayStatus = defaultPayRecordStatus(in.PayStatus)
+	pay.Remark = in.Remark
+	if in.PaidAt != "" {
+		pay.PaidAt = parseDateTime(in.PaidAt)
+	}
+	if err := r.SavePayment(pay); err != nil {
+		return nil, err
+	}
+	if err := s.syncPayStatus(ctx, bearerToken, o); err != nil {
+		return nil, err
+	}
+	detail := s.toPaymentDetail(pay)
+	return &detail, nil
+}
+
+func (s *SelfOrderService) DeletePayment(ctx context.Context, bearerToken string, selfOrderID, paymentID uint64) error {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetByID(selfOrderID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if isEcommerceSelfOrder(o) {
+		return fmt.Errorf("电商订单默认已付款，无需删除付款记录")
+	}
+	atts, err := r.ListAttachments(selfOrderID)
+	if err != nil {
+		return err
+	}
+	for _, a := range atts {
+		if a.PaymentID == paymentID {
+			if err := r.DeleteAttachment(selfOrderID, a.ID); err != nil {
+				return err
+			}
+		}
+	}
+	if err := r.DeletePayment(selfOrderID, paymentID); err != nil {
+		return err
+	}
+	return s.syncPayStatus(ctx, bearerToken, o)
+}
+
+func (s *SelfOrderService) syncPayStatus(ctx context.Context, bearerToken string, o *model.SelfOrder) error {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	fresh, err := r.GetByID(o.ID)
+	if err != nil {
+		return err
+	}
+	sum, err := r.SumPaidPayments(fresh.ID)
+	if err != nil {
+		return err
+	}
+	earliest, err := r.EarliestPaidAt(fresh.ID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case sum <= 0:
+		fresh.PayStatus = model.DistPayStatusUnpaid
+		fresh.PaidAt = nil
+	case sum+0.001 < fresh.SaleAmount:
+		fresh.PayStatus = model.DistPayStatusPartial
+		fresh.PaidAt = earliest
+	default:
+		fresh.PayStatus = model.DistPayStatusPaid
+		fresh.PaidAt = earliest
+		// 付款累计 >= 销售额且单据为已下单时，自动推进为已付款
+		if fresh.Status == model.SelfOrderStatusOrdered || fresh.Status == model.SelfOrderStatusConfirmed {
+			fresh.Status = model.SelfOrderStatusPaid
+		}
+	}
+	if err := r.Save(fresh); err != nil {
+		return err
+	}
+	*o = *fresh
+	return s.callbackOrderPayment(ctx, bearerToken, fresh)
+}
+
+func (s *SelfOrderService) callbackOrderPayment(ctx context.Context, bearerToken string, o *model.SelfOrder) error {
+	if s.oc == nil || o.RefSoID == 0 {
+		return nil
+	}
+	req := ordercore.UpdatePaymentRequest{
+		PayStatus: firstNonEmpty(o.PayStatus, model.DistPayStatusUnpaid),
+	}
+	if o.PaidAt != nil {
+		t := formatTimePtr(o.PaidAt)
+		req.PayTime = &t
+	} else {
+		req.ClearPayTime = true
+	}
+	if err := s.oc.UpdatePayment(ctx, bearerToken, o.RefSoID, req); err != nil {
+		return fmt.Errorf("回写订单中心付款状态失败: %w", err)
+	}
+	return nil
+}
+
+func (s *SelfOrderService) toPaymentDetail(p *model.SelfPayment) dto.SelfPaymentDetail {
+	d := dto.SelfPaymentDetail{
+		ID: p.ID, SelfOrderID: p.SelfOrderID, PayAmount: p.PayAmount,
+		PayMethod: p.PayMethod, PayAccount: p.PayAccount,
+		PayeeAccount: p.PayeeAccount, PayeeName: p.PayeeName,
+		PayStatus: p.PayStatus, Remark: p.Remark,
+		CreatedAt: formatTime(p.CreatedAt),
+	}
+	if p.PaidAt != nil {
+		d.PaidAt = formatTimePtr(p.PaidAt)
+	}
+	return d
+}
+
 func (s *SelfOrderService) ListAttachments(selfOrderID uint64) ([]dto.SelfAttachmentDTO, error) {
 	if _, err := s.repos.SelfOrder.ForTenant(s.tenantID).GetByID(selfOrderID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -733,6 +996,7 @@ func (s *SelfOrderService) CreateAttachment(selfOrderID, uploadedBy uint64, in *
 	}
 	a := &model.SelfAttachment{
 		SelfOrderID: selfOrderID,
+		PaymentID:   in.PaymentID,
 		ShipmentID:  in.ShipmentID,
 		FileType:    in.FileType,
 		FileName:    in.FileName,
@@ -775,6 +1039,9 @@ func (s *SelfOrderService) Ship(ctx context.Context, bearerToken string, id uint
 	}
 	if o.Status == model.SelfOrderStatusCancelled {
 		return nil, fmt.Errorf("已取消的自营单不能发货")
+	}
+	if o.Status == model.SelfOrderStatusDraft {
+		return nil, fmt.Errorf("草稿自营单请先提交下单再发货")
 	}
 	if o.Status == model.SelfOrderStatusCompleted {
 		return nil, fmt.Errorf("已完成，不能重复发货")
@@ -923,6 +1190,109 @@ func (s *SelfOrderService) RetryStockDeduct(ctx context.Context, bearerToken str
 		return nil, fmt.Errorf("订单中心尚未回传成功，请先重试回传")
 	}
 	return s.Get(o.ID)
+}
+
+func (s *SelfOrderService) Submit(id uint64) (*dto.SelfOrderDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetWithItems(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if o.Status != model.SelfOrderStatusDraft {
+		return nil, ErrInvalidStatus
+	}
+	if len(o.Items) == 0 {
+		return nil, fmt.Errorf("自营单明细不能为空")
+	}
+	for i, it := range o.Items {
+		if it.CostUnitPrice <= 0 && it.CostAmount <= 0 {
+			name := strings.TrimSpace(it.SkuSpecs)
+			if name == "" {
+				name = strings.TrimSpace(it.ProductName)
+			}
+			if name == "" {
+				name = fmt.Sprintf("第%d行", i+1)
+			}
+			return nil, fmt.Errorf("请先填写成本价或绑定库存 SKU：%s", name)
+		}
+	}
+	return s.transition(id, model.SelfOrderStatusDraft, model.SelfOrderStatusOrdered, func(so *model.SelfOrder) {
+		if so.OrderedAt == nil {
+			now := time.Now()
+			so.OrderedAt = &now
+		}
+	})
+}
+
+func (s *SelfOrderService) MarkPaid(id uint64) (*dto.SelfOrderDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetByID(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if isEcommerceSelfOrder(o) {
+		return nil, fmt.Errorf("电商订单默认已付款，无需再标记付款")
+	}
+	return s.transition(id, model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid, func(o *model.SelfOrder) {
+		o.PayStatus = model.DistPayStatusPaid
+		if o.PaidAt == nil {
+			now := time.Now()
+			o.PaidAt = &now
+		}
+	})
+}
+
+func (s *SelfOrderService) Complete(id uint64) (*dto.SelfOrderDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetByID(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{
+		model.SelfOrderStatusPaid: true, model.SelfOrderStatusPartialShipped: true,
+		model.SelfOrderStatusShipped: true,
+	}
+	if !allowed[o.Status] {
+		return nil, ErrInvalidStatus
+	}
+	now := time.Now()
+	o.Status = model.SelfOrderStatusCompleted
+	o.CompletedAt = &now
+	if err := r.Save(o); err != nil {
+		return nil, err
+	}
+	return s.Get(id)
+}
+
+func (s *SelfOrderService) transition(id uint64, from, to string, apply func(*model.SelfOrder)) (*dto.SelfOrderDetail, error) {
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	o, err := r.GetByID(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if o.Status != from {
+		return nil, ErrInvalidStatus
+	}
+	o.Status = to
+	if apply != nil {
+		apply(o)
+	}
+	if err := r.Save(o); err != nil {
+		return nil, err
+	}
+	return s.Get(id)
 }
 
 func (s *SelfOrderService) Delete(id uint64) error {
@@ -1171,7 +1541,12 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 	}
 	switch {
 	case fullyShipped && hasShipped:
-		o.Status = model.SelfOrderStatusShipped
+		// 自营无「到货」环节：全部发出即完成
+		o.Status = model.SelfOrderStatusCompleted
+		if o.CompletedAt == nil {
+			now := time.Now()
+			o.CompletedAt = &now
+		}
 	case hasShipped:
 		o.Status = model.SelfOrderStatusPartialShipped
 	}
@@ -1211,7 +1586,7 @@ func (s *SelfOrderService) toShipmentDTO(sh *model.SelfShipment) dto.SelfShipmen
 
 func (s *SelfOrderService) toAttachmentDTO(a *model.SelfAttachment) dto.SelfAttachmentDTO {
 	return dto.SelfAttachmentDTO{
-		ID: a.ID, SelfOrderID: a.SelfOrderID, ShipmentID: a.ShipmentID,
+		ID: a.ID, SelfOrderID: a.SelfOrderID, PaymentID: a.PaymentID, ShipmentID: a.ShipmentID,
 		FileType: a.FileType, FileName: a.FileName, FileURL: a.FileURL,
 		UploadedBy: a.UploadedBy, Remark: a.Remark,
 		CreatedAt: formatTime(a.CreatedAt),
@@ -1230,6 +1605,7 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 		ID: o.ID, SoNo: o.SoNo, Status: o.Status, WarehouseID: o.WarehouseID,
 		RefSoID: o.RefSoID, RefTraceID: o.RefTraceID,
 		SaleAmount: o.SaleAmount, CostAmount: o.CostAmount,
+		PayStatus: firstNonEmpty(o.PayStatus, model.DistPayStatusUnpaid),
 		BuyerName: o.BuyerName, BuyerPhone: o.BuyerPhone, Address: o.Address,
 		Remark: o.Remark,
 		SourceChannel: o.SourceChannel, Platform: o.Platform, ShopName: o.ShopName,
@@ -1237,6 +1613,9 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 		FenFaRemark: o.FenFaRemark, PrinterRemark: o.PrinterRemark,
 		StockDeducted: o.StockDeducted, StockError: o.StockError,
 		CreatedAt: formatTime(o.CreatedAt), UpdatedAt: formatTime(o.UpdatedAt),
+	}
+	if o.PaidAt != nil {
+		d.PaidAt = formatTimePtr(o.PaidAt)
 	}
 	if o.OrderedAt != nil {
 		d.OrderedAt = formatTimePtr(o.OrderedAt)
@@ -1263,6 +1642,52 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 	return d
 }
 
+// resolveSelfOrderCreatePay 创建时确定单据状态与付款：
+// - 电商(kdzs)或显式 payStatus=paid → 已付款
+// - 手工单（含关联销售单）→ 草稿，待填成本后提交
+func isEcommerceSelfOrder(o *model.SelfOrder) bool {
+	if o == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(o.SourceChannel), "kdzs")
+}
+
+// - 其它有关联销售单 → 已下单（未付）
+// - 无关联 → 草稿
+func resolveSelfOrderCreatePay(in *dto.SelfOrderInput) (status, payStatus string, paidAt *time.Time) {
+	status = model.SelfOrderStatusOrdered
+	payStatus = model.DistPayStatusUnpaid
+	if in == nil {
+		return status, payStatus, nil
+	}
+	channel := strings.ToLower(strings.TrimSpace(in.SourceChannel))
+	explicitPaid := strings.EqualFold(strings.TrimSpace(in.PayStatus), model.DistPayStatusPaid)
+	ecommercePaid := channel == "kdzs" || explicitPaid
+	if ecommercePaid {
+		status = model.SelfOrderStatusPaid
+		payStatus = model.DistPayStatusPaid
+		if t := parseDateTime(in.PaidAt); t != nil {
+			paidAt = t
+		} else if t := parseDateTime(in.OrderedAt); t != nil {
+			paidAt = t
+		}
+		return status, payStatus, paidAt
+	}
+	if channel == "manual" || in.RefSoID == 0 {
+		status = model.SelfOrderStatusDraft
+	}
+	return status, payStatus, nil
+}
+
 func round2(v float64) float64 {
 	return math.Round(v*100) / 100
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

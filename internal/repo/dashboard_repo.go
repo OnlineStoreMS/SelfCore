@@ -48,13 +48,52 @@ func (r *DashboardRepo) CountSelfOrdersSince(dayStart *time.Time, excludeCancell
 	if excludeCancelled {
 		q = q.Where("status <> ?", model.SelfOrderStatusCancelled)
 	}
-	if dayStart != nil {
-		end := dayStart.Add(24 * time.Hour)
-		q = q.Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", *dayStart, end)
-	}
+	q = scopeSelfOrderBusinessDay(q, dayStart)
 	var n int64
 	err := q.Count(&n).Error
 	return n, err
+}
+
+func (r *DashboardRepo) CountSelfOrdersByStatusSince(status string, dayStart *time.Time) (int64, error) {
+	q := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status = ?", status)
+	q = scopeSelfOrderBusinessDay(q, dayStart)
+	var n int64
+	err := q.Count(&n).Error
+	return n, err
+}
+
+func (r *DashboardRepo) CountSelfOrdersByStatusesSince(statuses []string, dayStart *time.Time) (int64, error) {
+	q := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("status IN ?", statuses)
+	q = scopeSelfOrderBusinessDay(q, dayStart)
+	var n int64
+	err := q.Count(&n).Error
+	return n, err
+}
+
+func (r *DashboardRepo) CountUnpaidSelfOrdersSince(dayStart *time.Time) (int64, error) {
+	q := r.db.Model(&model.SelfOrder{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("pay_status IN ?", []string{"unpaid", "partial"}).
+		Where("status NOT IN ?", []string{
+			model.SelfOrderStatusDraft, model.SelfOrderStatusCancelled,
+		})
+	q = scopeSelfOrderBusinessDay(q, dayStart)
+	var n int64
+	err := q.Count(&n).Error
+	return n, err
+}
+
+// scopeSelfOrderBusinessDay 按业务日：COALESCE(ordered_at, created_at) ∈ [dayStart, dayStart+1)
+func scopeSelfOrderBusinessDay(q *gorm.DB, dayStart *time.Time) *gorm.DB {
+	if dayStart == nil {
+		return q
+	}
+	end := dayStart.Add(24 * time.Hour)
+	return q.Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", *dayStart, end)
 }
 
 func (r *DashboardRepo) CountPOsByStatus(status string) (int64, error) {
@@ -141,6 +180,18 @@ func (r *DashboardRepo) CountPOsSince(since time.Time, excludeDraftCancel bool) 
 	if excludeDraftCancel {
 		q = q.Where("status NOT IN ?", []string{"draft", "cancelled"})
 	}
+	var n int64
+	err := q.Count(&n).Error
+	return n, err
+}
+
+// CountDistOrdersOnDay 今日分销单（全类型）；excludeCancelled 时排除已取消。
+func (r *DashboardRepo) CountDistOrdersOnDay(dayStart time.Time, excludeCancelled bool) (int64, error) {
+	q := r.db.Model(&model.DistOrder{}).Scopes(scopeTenant(r.tenantID))
+	if excludeCancelled {
+		q = q.Where("status <> ?", model.DistStatusCancelled)
+	}
+	q = scopePOBusinessDay(q, &dayStart)
 	var n int64
 	err := q.Count(&n).Error
 	return n, err
@@ -281,15 +332,51 @@ func (r *DashboardRepo) SumDistSaleAndCostWithCostOnDay(dayStart time.Time) (sal
 	return out.SaleAmount, out.CostAmount, err
 }
 
+// SumUnpaidAmount 自营 + 分销待收余额合计：订单金额 − 已付（部分付款只计差额），排除草稿与取消。
 func (r *DashboardRepo) SumUnpaidAmount() (float64, error) {
-	var sum float64
-	err := r.db.Model(&model.DistOrder{}).
-		Scopes(scopeTenant(r.tenantID)).
-		Where("pay_status IN ?", []string{"unpaid", "partial"}).
-		Where("status NOT IN ?", []string{"draft", "cancelled"}).
-		Select("COALESCE(SUM(total_amount), 0)").
-		Scan(&sum).Error
-	return sum, err
+	var distSum float64
+	err := r.db.Raw(`
+		SELECT COALESCE(SUM(GREATEST(d.total_amount - COALESCE(p.paid, 0), 0)), 0)
+		FROM dist_orders d
+		LEFT JOIN (
+			SELECT dist_order_id, SUM(pay_amount) AS paid
+			FROM dist_receipts
+			WHERE pay_status = ? AND tenant_id = ?
+			GROUP BY dist_order_id
+		) p ON p.dist_order_id = d.id
+		WHERE d.tenant_id = ?
+		  AND d.pay_status IN (?, ?)
+		  AND d.status NOT IN (?, ?)
+	`, model.DistPayStatusPaid, r.tenantID,
+		r.tenantID,
+		model.DistPayStatusUnpaid, model.DistPayStatusPartial,
+		model.DistStatusDraft, model.DistStatusCancelled,
+	).Scan(&distSum).Error
+	if err != nil {
+		return 0, err
+	}
+	var selfSum float64
+	err = r.db.Raw(`
+		SELECT COALESCE(SUM(GREATEST(s.sale_amount - COALESCE(p.paid, 0), 0)), 0)
+		FROM self_orders s
+		LEFT JOIN (
+			SELECT self_order_id, SUM(pay_amount) AS paid
+			FROM self_payments
+			WHERE pay_status = ? AND tenant_id = ?
+			GROUP BY self_order_id
+		) p ON p.self_order_id = s.id
+		WHERE s.tenant_id = ?
+		  AND s.pay_status IN (?, ?)
+		  AND s.status NOT IN (?, ?)
+	`, model.DistPayStatusPaid, r.tenantID,
+		r.tenantID,
+		model.DistPayStatusUnpaid, model.DistPayStatusPartial,
+		model.SelfOrderStatusDraft, model.SelfOrderStatusCancelled,
+	).Scan(&selfSum).Error
+	if err != nil {
+		return 0, err
+	}
+	return distSum + selfSum, nil
 }
 
 type StatusCountRow struct {

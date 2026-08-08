@@ -11,6 +11,7 @@ import {
   type SelfOrderListItem,
   type SelfOrderDetail,
 } from '../../api/selfOrder'
+import { SELF_PAY_STATUS_MAP } from '../../api/selfOrderTracking'
 import { decryptOrders, fetchOrder, formatDateTime, formatPlatformShop, formatRemarkLines, labelSource, type OrderBrief } from '../../api/order'
 import { dateShortcuts, dateRangeDefaultTime, last7DaysDateTimeRange, todayDateTimeRange } from '../../utils/date'
 import { copyToClipboard } from '../../utils/clipboard'
@@ -29,6 +30,7 @@ const decryptRow = reactive<Record<number, boolean>>({})
 const copyRow = reactive<Record<number, boolean>>({})
 const statusFilter = ref('')
 const statusesFilter = ref('')
+const payStatusesFilter = ref('')
 const excludeStatusesFilter = ref('')
 
 const filters = reactive({
@@ -36,6 +38,7 @@ const filters = reactive({
   pageSize: 20,
   keyword: '',
   shipStatus: '',
+  status: '',
   orderedRange: last7DaysDateTimeRange() as [string, string] | null,
   shippedRange: null as [string, string] | null,
 })
@@ -166,15 +169,22 @@ function applyListIntent() {
   if (!intent) return
   statusFilter.value = ''
   statusesFilter.value = ''
+  payStatusesFilter.value = ''
   excludeStatusesFilter.value = ''
+  filters.status = ''
   if (intent.statuses?.length) {
     if (intent.statuses.length === 1) {
       statusFilter.value = intent.statuses[0]
+      filters.status = intent.statuses[0]
     } else {
       statusesFilter.value = intent.statuses.join(',')
     }
   } else if (intent.status) {
     statusFilter.value = intent.status
+    filters.status = intent.status
+  }
+  if (intent.payStatuses?.length) {
+    payStatusesFilter.value = intent.payStatuses.join(',')
   }
   if (intent.excludeStatuses?.length) {
     excludeStatusesFilter.value = intent.excludeStatuses.join(',')
@@ -198,8 +208,9 @@ async function load() {
       pageSize: filters.pageSize,
       keyword: filters.keyword || undefined,
       shipStatus: filters.shipStatus || undefined,
-      status: statusesFilter.value ? undefined : (statusFilter.value || undefined),
+      status: statusesFilter.value ? undefined : (statusFilter.value || filters.status || undefined),
       statuses: statusesFilter.value || undefined,
+      payStatus: payStatusesFilter.value || undefined,
       excludeStatuses: excludeStatusesFilter.value || undefined,
     }
     if (filters.orderedRange?.length === 2) {
@@ -225,11 +236,19 @@ function onFilterChange() {
   void load()
 }
 
+function onStatusFilterChange() {
+  statusFilter.value = filters.status
+  statusesFilter.value = ''
+  onFilterChange()
+}
+
 function resetFilters() {
   filters.keyword = ''
   filters.shipStatus = ''
+  filters.status = ''
   statusFilter.value = ''
   statusesFilter.value = ''
+  payStatusesFilter.value = ''
   excludeStatusesFilter.value = ''
   filters.orderedRange = last7DaysDateTimeRange()
   filters.shippedRange = null
@@ -238,6 +257,46 @@ function resetFilters() {
 
 const intentTags = computed(() => {
   const tags: { key: string; label: string; clear: () => void }[] = []
+  if (statusFilter.value || filters.status) {
+    const s = statusFilter.value || filters.status
+    tags.push({
+      key: 'status',
+      label: `状态：${statusLabel(s)}`,
+      clear: () => {
+        statusFilter.value = ''
+        filters.status = ''
+        filters.page = 1
+        void load()
+      },
+    })
+  }
+  if (statusesFilter.value) {
+    const labels = statusesFilter.value.split(',').map((s) => statusLabel(s.trim())).filter(Boolean)
+    tags.push({
+      key: 'statuses',
+      label: `状态：${labels.join(' / ')}`,
+      clear: () => {
+        statusesFilter.value = ''
+        filters.page = 1
+        void load()
+      },
+    })
+  }
+  if (payStatusesFilter.value) {
+    const labels = payStatusesFilter.value
+      .split(',')
+      .map((s) => SELF_PAY_STATUS_MAP[s.trim()] || s.trim())
+      .filter(Boolean)
+    tags.push({
+      key: 'pay',
+      label: `付款：${labels.join(' / ')}`,
+      clear: () => {
+        payStatusesFilter.value = ''
+        filters.page = 1
+        void load()
+      },
+    })
+  }
   if (excludeStatusesFilter.value) {
     const labels = excludeStatusesFilter.value
       .split(',')
@@ -281,6 +340,22 @@ onUnmounted(() => stopIntentListen())
 
     <div class="toolbar">
       <el-form :inline="true" class="filters" @submit.prevent="onFilterChange">
+        <el-form-item label="单据状态">
+          <el-select
+            v-model="filters.status"
+            clearable
+            style="width: 120px"
+            @change="onStatusFilterChange"
+          >
+            <el-option label="草稿" value="draft" />
+            <el-option label="已下单" value="ordered" />
+            <el-option label="已付款" value="paid" />
+            <el-option label="部分发货" value="partial_shipped" />
+            <el-option label="已发货" value="shipped" />
+            <el-option label="已完成" value="completed" />
+            <el-option label="已取消" value="cancelled" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="发货状态">
           <el-select v-model="filters.shipStatus" clearable style="width: 110px" @change="onFilterChange">
             <el-option label="待发货" value="wait_ship" />
@@ -388,6 +463,11 @@ onUnmounted(() => stopIntentListen())
       <el-table-column label="金额" width="96" align="right">
         <template #default="{ row }">
           ¥{{ Number(row.saleAmount || 0).toFixed(2) }}
+        </template>
+      </el-table-column>
+      <el-table-column label="付款" width="84" align="center">
+        <template #default="{ row }">
+          {{ SELF_PAY_STATUS_MAP[row.payStatus || 'unpaid'] || row.payStatus || '未付清' }}
         </template>
       </el-table-column>
       <el-table-column prop="itemCount" label="行数" width="56" align="center" />

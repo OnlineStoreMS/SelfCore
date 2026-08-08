@@ -12,14 +12,22 @@ type DashboardStats struct {
 }
 
 type DashboardWorkbench struct {
-	SelfOrderPO       int64 `json:"selfOrderPO"`
-	DropshipPO        int64 `json:"dropshipPO"`
-	WholesalePO         int64 `json:"wholesalePO"`
-	DraftPO           int64 `json:"draftPO"`
-	ConfirmedPO         int64 `json:"confirmedPO"`
-	UnpaidPO          int64 `json:"unpaidPO"`
-	InTransitPO       int64 `json:"inTransitPO"`
-	PartialReceivedPO int64 `json:"partialReceivedPO"`
+	// 自营 · 今日
+	SelfOrderPO    int64 `json:"selfOrderPO"`    // 自营订单（排除取消）
+	SelfUnpaidPO   int64 `json:"selfUnpaidPO"`   // 自营待收款
+	SelfDraftPO    int64 `json:"selfDraftPO"`    // 自营草稿待提交
+	SelfWaitShipPO int64 `json:"selfWaitShipPO"` // 自营待发货（已下单/已付款）
+	// 分销 · 今日
+	DistOrderPO    int64 `json:"distOrderPO"`    // 分销订单（全类型，排除取消）
+	DropshipPO     int64 `json:"dropshipPO"`     // 兼容：分销直发
+	WholesalePO    int64 `json:"wholesalePO"`    // 兼容：批发
+	DraftPO        int64 `json:"draftPO"`        // 分销草稿待提交
+	UnpaidPO       int64 `json:"unpaidPO"`       // 分销待收款
+	DistWaitShipPO int64 `json:"distWaitShipPO"` // 分销待发货（已确认/已付款）
+	OrderedPO         int64 `json:"orderedPO"`         // 兼容
+	ConfirmedPO       int64 `json:"confirmedPO"`       // 兼容：分销已确认
+	InTransitPO       int64 `json:"inTransitPO"`       // 兼容：分销发货中
+	PartialReceivedPO int64 `json:"partialReceivedPO"` // 兼容
 	ActiveOffers      int64 `json:"activeOffers"`
 	// 今日毛利：仅成本额 > 0 的订单；毛利润 = 有成本销售额 − 成本额
 	TodayDropshipSaleAmount      float64 `json:"todayDropshipSaleAmount"`      // 有成本订单的销售额（tip 用）

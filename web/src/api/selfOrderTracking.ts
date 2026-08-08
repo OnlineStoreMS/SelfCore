@@ -30,6 +30,7 @@ export interface SelfShipment {
 export interface SelfAttachment {
   id: number
   selfOrderId: number
+  paymentId?: number
   shipmentId?: number
   fileType: string
   fileName: string
@@ -39,10 +40,31 @@ export interface SelfAttachment {
   createdAt: string
 }
 
+export interface SelfPayment {
+  id: number
+  selfOrderId: number
+  payAmount: number
+  payMethod?: string
+  payAccount?: string
+  payeeAccount?: string
+  payeeName?: string
+  payStatus: string
+  paidAt?: string
+  remark?: string
+  createdAt: string
+}
+
 export const SELF_ATTACHMENT_TYPE_MAP: Record<string, string> = {
+  payment_screenshot: '付款截图',
   shipment_photo: '物流发货照片',
   contract: '合同',
   other: '其他',
+}
+
+export const SELF_PAY_STATUS_MAP: Record<string, string> = {
+  unpaid: '未付清',
+  partial: '部分付款',
+  paid: '已付清',
 }
 
 export async function fetchSelfShipments(selfOrderId: number) {
@@ -80,6 +102,7 @@ export async function createSelfAttachment(selfOrderId: number, data: {
   fileType: string
   fileName: string
   fileUrl: string
+  paymentId?: number
   shipmentId?: number
   remark?: string
 }) {
@@ -88,6 +111,18 @@ export async function createSelfAttachment(selfOrderId: number, data: {
 
 export async function deleteSelfAttachment(selfOrderId: number, attachmentId: number) {
   return unwrap(await client.delete(`/self-orders/${selfOrderId}/attachments/${attachmentId}`))
+}
+
+export async function fetchSelfPayments(selfOrderId: number) {
+  return unwrap<SelfPayment[]>(await client.get(`/self-orders/${selfOrderId}/payments`))
+}
+
+export async function createSelfPayment(selfOrderId: number, data: Partial<SelfPayment> & { payAmount: number }) {
+  return unwrap<SelfPayment>(await client.post(`/self-orders/${selfOrderId}/payments`, data))
+}
+
+export async function deleteSelfPayment(selfOrderId: number, paymentId: number) {
+  return unwrap(await client.delete(`/self-orders/${selfOrderId}/payments/${paymentId}`))
 }
 
 export { uploadFile } from './tracking'

@@ -49,9 +49,10 @@ function defaultRange(): [string, string] {
 const dateRange = ref<[string, string]>(defaultRange())
 
 const emptyWorkbench = {
-  selfOrderPO: 0, dropshipPO: 0, wholesalePO: 0,
-  draftPO: 0, confirmedPO: 0, unpaidPO: 0,
-  inTransitPO: 0, partialReceivedPO: 0, activeOffers: 0,
+  selfOrderPO: 0, selfUnpaidPO: 0, selfDraftPO: 0, selfWaitShipPO: 0,
+  distOrderPO: 0, dropshipPO: 0, wholesalePO: 0,
+  draftPO: 0, unpaidPO: 0, distWaitShipPO: 0,
+  orderedPO: 0, confirmedPO: 0, inTransitPO: 0, partialReceivedPO: 0, activeOffers: 0,
   todayDropshipSaleAmount: 0, todayDropshipWholesaleAmount: 0, todayDropshipProfit: 0,
   todayDistSaleAmount: 0, todaySelfSaleAmount: 0,
   weekSelfSaleAmount: 0, monthSelfSaleAmount: 0, monthDistSaleAmount: 0,
@@ -73,11 +74,22 @@ function fmtMoney(n?: number) {
   return (Number(n) || 0).toFixed(2)
 }
 
-const workCards = computed(() => [
+type WorkCard = {
+  key: string
+  label: string
+  tip: string
+  value: number
+  color: string
+  highlight?: boolean
+  go: () => void
+}
+
+/** 第一行：自营 */
+const selfWorkCards = computed<WorkCard[]>(() => [
   {
     key: 'self',
     label: '自营订单',
-    tip: '今日自营发货 · 点击查看',
+    tip: '今日自营 · 排除已取消',
     value: wb.value.selfOrderPO,
     color: '#d48806',
     highlight: true,
@@ -87,56 +99,60 @@ const workCards = computed(() => [
     }),
   },
   {
-    key: 'dropship',
-    label: '分销直发',
-    tip: '今日分销直发 · 点击查看',
-    value: wb.value.dropshipPO,
-    color: '#722ed1',
-    highlight: false,
-    go: () => goDistOrders(router, {
-      fulfillmentType: 'dropship',
+    key: 'self-unpaid',
+    label: '自营待收款',
+    tip: '今日未收 / 部分收款',
+    value: wb.value.selfUnpaidPO,
+    color: '#e6a23c',
+    highlight: true,
+    go: () => goSelfOrders(router, {
       today: true,
+      payStatuses: ['unpaid', 'partial'],
       excludeStatuses: ['draft', 'cancelled'],
     }),
   },
   {
-    key: 'wholesale',
-    label: '批发订单',
-    tip: '今日批发',
-    value: wb.value.wholesalePO,
-    color: '#1677ff',
-    highlight: false,
-    go: () => goDistOrders(router, {
-      fulfillmentType: 'wholesale',
-      today: true,
-      excludeStatuses: ['draft', 'cancelled'],
-    }),
-  },
-  {
-    key: 'draft',
-    label: '草稿待提交',
-    tip: '今日草稿',
-    value: wb.value.draftPO,
+    key: 'self-draft',
+    label: '自营草稿待提交',
+    tip: '今日自营草稿',
+    value: wb.value.selfDraftPO,
     color: '#64748b',
-    highlight: false,
-    go: () => goDistOrders(router, { status: 'draft', today: true }),
+    go: () => goSelfOrders(router, { status: 'draft', today: true }),
   },
   {
-    key: 'confirmed',
-    label: '已确认',
-    tip: '今日已确认待推进',
-    value: wb.value.confirmedPO,
-    color: '#409eff',
-    highlight: false,
-    go: () => goDistOrders(router, { status: 'confirmed', today: true }),
+    key: 'self-wait-ship',
+    label: '自营待发货',
+    tip: '今日已下单 / 已付款',
+    value: wb.value.selfWaitShipPO,
+    color: '#0f766e',
+    go: () => goSelfOrders(router, {
+      today: true,
+      statuses: ['ordered', 'paid'],
+    }),
+  },
+])
+
+/** 第二行：分销（全类型） */
+const distWorkCards = computed<WorkCard[]>(() => [
+  {
+    key: 'dist',
+    label: '分销订单',
+    tip: '今日全部分销类型 · 排除已取消',
+    value: wb.value.distOrderPO,
+    color: '#722ed1',
+    highlight: true,
+    go: () => goDistOrders(router, {
+      today: true,
+      excludeStatuses: ['cancelled'],
+    }),
   },
   {
-    key: 'unpaid',
-    label: '待收款',
+    key: 'dist-unpaid',
+    label: '分销待收款',
     tip: '今日未收 / 部分收款',
     value: wb.value.unpaidPO,
     color: '#e6a23c',
-    highlight: false,
+    highlight: true,
     go: () => goDistOrders(router, {
       today: true,
       payStatuses: ['unpaid', 'partial'],
@@ -144,25 +160,23 @@ const workCards = computed(() => [
     }),
   },
   {
-    key: 'transit',
-    label: '发货中',
-    tip: '今日部分发货 / 已发货',
-    value: wb.value.inTransitPO,
-    color: '#0f766e',
-    highlight: false,
-    go: () => goDistOrders(router, {
-      today: true,
-      statuses: ['partial_shipped', 'shipped'],
-    }),
+    key: 'dist-draft',
+    label: '分销草稿待提交',
+    tip: '今日分销草稿',
+    value: wb.value.draftPO,
+    color: '#64748b',
+    go: () => goDistOrders(router, { status: 'draft', today: true }),
   },
   {
-    key: 'offers',
-    label: '有效批发价',
-    tip: 'SKU 批发价',
-    value: wb.value.activeOffers,
-    color: '#67c23a',
-    highlight: false,
-    go: () => router.push('/sku-prices'),
+    key: 'dist-wait-ship',
+    label: '分销待发货',
+    tip: '今日已确认 / 已付款',
+    value: wb.value.distWaitShipPO,
+    color: '#0f766e',
+    go: () => goDistOrders(router, {
+      today: true,
+      statuses: ['confirmed', 'paid'],
+    }),
   },
 ])
 
@@ -207,7 +221,7 @@ const financeCards = computed(() => [
   {
     label: '待收金额',
     value: cost.value.unpaidAmount,
-    tip: '未收 / 部分收款合计',
+    tip: '自营 + 分销 · 待收余额（订单额 − 已付）',
   },
 ])
 
@@ -461,20 +475,43 @@ onUnmounted(() => {
 <template>
   <div v-loading="loading" class="dashboard">
     <div class="section-head">工作场景 · 今日</div>
-    <div class="work-cards">
-      <button
-        v-for="card in workCards"
-        :key="card.key"
-        type="button"
-        class="work-card"
-        :class="{ highlight: card.highlight && card.value > 0 }"
-        :style="{ '--accent': card.color }"
-        @click="card.go()"
-      >
-        <div class="work-label">{{ card.label }}</div>
-        <div class="work-value">{{ card.value }}</div>
-        <div class="work-tip">{{ card.tip }}</div>
-      </button>
+    <div class="work-rows">
+      <div class="work-row">
+        <div class="work-row-tag self">自营</div>
+        <div class="work-cards">
+          <button
+            v-for="card in selfWorkCards"
+            :key="card.key"
+            type="button"
+            class="work-card"
+            :class="{ highlight: card.highlight && card.value > 0 }"
+            :style="{ '--accent': card.color }"
+            @click="card.go()"
+          >
+            <div class="work-label">{{ card.label }}</div>
+            <div class="work-value">{{ card.value }}</div>
+            <div class="work-tip">{{ card.tip }}</div>
+          </button>
+        </div>
+      </div>
+      <div class="work-row">
+        <div class="work-row-tag dist">分销</div>
+        <div class="work-cards">
+          <button
+            v-for="card in distWorkCards"
+            :key="card.key"
+            type="button"
+            class="work-card"
+            :class="{ highlight: card.highlight && card.value > 0 }"
+            :style="{ '--accent': card.color }"
+            @click="card.go()"
+          >
+            <div class="work-label">{{ card.label }}</div>
+            <div class="work-value">{{ card.value }}</div>
+            <div class="work-tip">{{ card.tip }}</div>
+          </button>
+        </div>
+      </div>
     </div>
 
     <div class="section-head">成本与毛利</div>
@@ -612,6 +649,32 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.work-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.work-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.work-row-tag {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.work-row-tag.self {
+  color: #b45309;
+  background: #fff7e6;
+}
+.work-row-tag.dist {
+  color: #6b21a8;
+  background: #f5f0ff;
 }
 .work-cards {
   display: grid;

@@ -32,10 +32,15 @@ const (
 	AttachmentTypeContract          = "contract"
 	AttachmentTypeOther             = "other"
 
-	// 自营订单状态
-	SelfOrderStatusConfirmed      = "confirmed"
+	// 自营订单状态（对齐供应链：草稿→已下单→已付款→发货→完成）
+	SelfOrderStatusDraft          = "draft"
+	SelfOrderStatusOrdered        = "ordered"
+	SelfOrderStatusPaid           = "paid"
 	SelfOrderStatusPartialShipped = "partial_shipped"
 	SelfOrderStatusShipped        = "shipped"
 	SelfOrderStatusCompleted      = "completed"
 	SelfOrderStatusCancelled      = "cancelled"
+
+	// SelfOrderStatusConfirmed 历史别名（已迁移为 ordered/paid，仅兼容旧数据读取）
+	SelfOrderStatusConfirmed = "confirmed"
 )

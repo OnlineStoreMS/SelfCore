@@ -35,6 +35,7 @@ func (h *SelfOrderHandler) List(c *gin.Context) {
 	list, total, err := h.ps(c).List(repo.SelfOrderListFilter{
 		Status: c.Query("status"), Statuses: splitCSV(c.Query("statuses")),
 		ExcludeStatuses: splitCSV(c.Query("excludeStatuses")),
+		PayStatuses:     splitCSV(c.Query("payStatus")),
 		RefSoID: refSoID, Keyword: c.Query("keyword"),
 		ShipStatus:     c.Query("shipStatus"),
 		OrderedAtStart: parsePOCreatedAtStart(c.Query("orderedAtStart")),
@@ -94,6 +95,29 @@ func (h *SelfOrderHandler) BindInvSku(c *gin.Context) {
 		return
 	}
 	item, err := h.ps(c).BindInvSku(itemID, &in)
+	if errors.Is(err, service.ErrNotFound) {
+		response.Fail(c, http.StatusNotFound, "明细不存在")
+		return
+	}
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *SelfOrderHandler) UpdateItemCost(c *gin.Context) {
+	itemID, err := strconv.ParseUint(c.Param("itemId"), 10, 64)
+	if err != nil || itemID == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效明细 ID")
+		return
+	}
+	var in dto.UpdateItemCostInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.ps(c).UpdateItemCost(itemID, &in)
 	if errors.Is(err, service.ErrNotFound) {
 		response.Fail(c, http.StatusNotFound, "明细不存在")
 		return
@@ -353,6 +377,38 @@ func (h *SelfOrderHandler) Delete(c *gin.Context) {
 	response.OK(c, gin.H{"deleted": true})
 }
 
+func (h *SelfOrderHandler) Submit(c *gin.Context) {
+	h.doAction(c, func(id uint64) (*dto.SelfOrderDetail, error) {
+		return h.ps(c).Submit(id)
+	})
+}
+
+func (h *SelfOrderHandler) MarkPaid(c *gin.Context) {
+	h.doAction(c, func(id uint64) (*dto.SelfOrderDetail, error) {
+		return h.ps(c).MarkPaid(id)
+	})
+}
+
+func (h *SelfOrderHandler) Complete(c *gin.Context) {
+	h.doAction(c, func(id uint64) (*dto.SelfOrderDetail, error) {
+		return h.ps(c).Complete(id)
+	})
+}
+
+func (h *SelfOrderHandler) doAction(c *gin.Context, fn func(uint64) (*dto.SelfOrderDetail, error)) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	item, err := fn(id)
+	if err != nil {
+		httputil.HandleServiceError(c, err)
+		return
+	}
+	response.OK(c, item)
+}
+
 func (h *SelfOrderHandler) Cancel(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {
@@ -389,6 +445,97 @@ func (h *SelfOrderHandler) CancelByRefSo(c *gin.Context) {
 		return
 	}
 	response.OK(c, list)
+}
+
+func (h *SelfOrderHandler) ListPayments(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	list, err := h.ps(c).ListPayments(id)
+	if errors.Is(err, service.ErrNotFound) {
+		response.Fail(c, http.StatusNotFound, "自营单不存在")
+		return
+	}
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(c, list)
+}
+
+func (h *SelfOrderHandler) CreatePayment(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	var in dto.SelfPaymentInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.ps(c).CreatePayment(c.Request.Context(), authcontext.BearerToken(c), id, &in)
+	if errors.Is(err, service.ErrNotFound) {
+		response.Fail(c, http.StatusNotFound, "自营单不存在")
+		return
+	}
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.Created(c, item)
+}
+
+func (h *SelfOrderHandler) UpdatePayment(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	paymentID, err := strconv.ParseUint(c.Param("paymentId"), 10, 64)
+	if err != nil || paymentID == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效付款 ID")
+		return
+	}
+	var in dto.SelfPaymentInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Fail(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	item, err := h.ps(c).UpdatePayment(c.Request.Context(), authcontext.BearerToken(c), id, paymentID, &in)
+	if errors.Is(err, service.ErrNotFound) {
+		response.Fail(c, http.StatusNotFound, "记录不存在")
+		return
+	}
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, item)
+}
+
+func (h *SelfOrderHandler) DeletePayment(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效 ID")
+		return
+	}
+	paymentID, err := strconv.ParseUint(c.Param("paymentId"), 10, 64)
+	if err != nil || paymentID == 0 {
+		response.Fail(c, http.StatusBadRequest, "无效付款 ID")
+		return
+	}
+	if err := h.ps(c).DeletePayment(c.Request.Context(), authcontext.BearerToken(c), id, paymentID); err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "记录不存在")
+			return
+		}
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"deleted": true})
 }
 
 func parseDateTimeInclusiveEnd(s string) *time.Time {

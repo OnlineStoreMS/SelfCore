@@ -1,6 +1,7 @@
 package repo
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ type SelfOrderListFilter struct {
 	Status         string
 	Statuses       []string
 	ExcludeStatuses []string
+	PayStatuses     []string
 	RefSoID        uint64
 	Keyword        string
 	ShipStatus     string // wait_ship | shipped（按 status 推导）
@@ -48,9 +50,16 @@ func (r *SelfOrderRepo) List(f SelfOrderListFilter) ([]model.SelfOrder, int64, e
 	if len(f.ExcludeStatuses) > 0 {
 		q = q.Where("status NOT IN ?", f.ExcludeStatuses)
 	}
+	if len(f.PayStatuses) > 0 {
+		q = q.Where("pay_status IN ?", f.PayStatuses)
+	}
 	switch f.ShipStatus {
 	case "wait_ship":
-		q = q.Where("status = ?", model.SelfOrderStatusConfirmed)
+		q = q.Where("status IN ?", []string{
+			model.SelfOrderStatusOrdered,
+			model.SelfOrderStatusPaid,
+			model.SelfOrderStatusConfirmed, // 兼容未迁移旧数据
+		})
 	case "shipped":
 		q = q.Where("status IN ?", []string{
 			model.SelfOrderStatusPartialShipped,
@@ -379,6 +388,68 @@ func (r *SelfOrderRepo) SumShippedQtyByItem(selfOrderID uint64) (map[uint64]int,
 	return out, nil
 }
 
+func (r *SelfOrderRepo) ListPayments(selfOrderID uint64) ([]model.SelfPayment, error) {
+	var list []model.SelfPayment
+	err := r.db.Scopes(scopeTenant(r.tenantID)).
+		Where("self_order_id = ?", selfOrderID).
+		Order("id DESC").
+		Find(&list).Error
+	return list, err
+}
+
+func (r *SelfOrderRepo) GetPayment(selfOrderID, id uint64) (*model.SelfPayment, error) {
+	var p model.SelfPayment
+	err := r.db.Scopes(scopeTenant(r.tenantID)).
+		Where("self_order_id = ? AND id = ?", selfOrderID, id).
+		First(&p).Error
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *SelfOrderRepo) CreatePayment(p *model.SelfPayment) error {
+	p.TenantID = r.tenantID
+	return r.db.Create(p).Error
+}
+
+func (r *SelfOrderRepo) SavePayment(p *model.SelfPayment) error {
+	return r.db.Save(p).Error
+}
+
+func (r *SelfOrderRepo) DeletePayment(selfOrderID, id uint64) error {
+	return r.db.Scopes(scopeTenant(r.tenantID)).
+		Where("self_order_id = ? AND id = ?", selfOrderID, id).
+		Delete(&model.SelfPayment{}).Error
+}
+
+func (r *SelfOrderRepo) SumPaidPayments(selfOrderID uint64) (float64, error) {
+	var sum float64
+	err := r.db.Model(&model.SelfPayment{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("self_order_id = ? AND pay_status = ?", selfOrderID, model.DistPayStatusPaid).
+		Select("COALESCE(SUM(pay_amount), 0)").
+		Scan(&sum).Error
+	return sum, err
+}
+
+func (r *SelfOrderRepo) EarliestPaidAt(selfOrderID uint64) (*time.Time, error) {
+	var paidAt sql.NullTime
+	err := r.db.Model(&model.SelfPayment{}).
+		Scopes(scopeTenant(r.tenantID)).
+		Where("self_order_id = ? AND pay_status = ? AND paid_at IS NOT NULL", selfOrderID, model.DistPayStatusPaid).
+		Select("MIN(paid_at)").
+		Scan(&paidAt).Error
+	if err != nil {
+		return nil, err
+	}
+	if !paidAt.Valid {
+		return nil, nil
+	}
+	t := paidAt.Time
+	return &t, nil
+}
+
 func (r *SelfOrderRepo) ListAttachments(selfOrderID uint64) ([]model.SelfAttachment, error) {
 	var list []model.SelfAttachment
 	err := r.db.Scopes(scopeTenant(r.tenantID)).
@@ -428,6 +499,7 @@ func (r *SelfOrderRepo) Delete(id uint64) error {
 		}
 		for _, m := range []any{
 			&model.SelfShipment{},
+			&model.SelfPayment{},
 			&model.SelfAttachment{},
 		} {
 			if err := tx.Scopes(scopeTenant(r.tenantID)).

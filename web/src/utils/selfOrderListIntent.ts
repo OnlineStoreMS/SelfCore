@@ -4,6 +4,8 @@ import type { Router } from 'vue-router'
 export type SelfOrderListIntent = {
   status?: string
   statuses?: string[]
+  /** 付款状态，如 unpaid,partial */
+  payStatuses?: string[]
   excludeStatuses?: string[]
   /** 工作台「今日」 */
   today?: boolean
