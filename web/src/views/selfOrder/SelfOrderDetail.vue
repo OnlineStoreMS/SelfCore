@@ -85,6 +85,11 @@ const canCancel = computed(() => {
 })
 
 const isDraft = computed(() => order.value?.status === 'draft')
+/** 完成/取消前可改成本、绑库存 SKU（含已下单手工单） */
+const canEditCost = computed(() => {
+  const s = order.value?.status
+  return !!s && !['completed', 'cancelled'].includes(s)
+})
 /** 电商订单默认已付款，不展示付款 Tab / 标记付款 */
 const isEcommerce = computed(() => (order.value?.sourceChannel || '').toLowerCase() === 'kdzs')
 const showPaymentTab = computed(() => !!order.value && !isEcommerce.value)
@@ -174,7 +179,7 @@ async function handleSubmit() {
 }
 
 async function onCostChange(row: SelfOrderItem, val: number | undefined) {
-  if (!row.id || !isDraft.value) return
+  if (!row.id || !canEditCost.value) return
   const price = Number(val)
   if (Number.isNaN(price) || price < 0) {
     ElMessage.warning('成本单价不能为负')
@@ -388,7 +393,7 @@ async function confirmBindSku(sku: WarehouseSku) {
                   <span v-if="row.invSkuCode">{{ row.invSkuCode }}</span>
                   <span v-else class="muted">未绑定</span>
                   <el-button
-                    v-if="isDraft"
+                    v-if="canEditCost"
                     link
                     type="primary"
                     size="small"
@@ -407,7 +412,7 @@ async function confirmBindSku(sku: WarehouseSku) {
             <el-table-column label="成本单价" width="130" align="right">
               <template #default="{ row }">
                 <el-input-number
-                  v-if="isDraft"
+                  v-if="canEditCost"
                   :model-value="Number(row.costUnitPrice || 0)"
                   :min="0"
                   :precision="2"

@@ -241,8 +241,8 @@ func (s *SelfOrderService) BindInvSku(itemID uint64, in *dto.BindInvSkuInput) (*
 	if err != nil {
 		return nil, err
 	}
-	if oHead.Status != model.SelfOrderStatusDraft {
-		return nil, fmt.Errorf("仅草稿自营单可绑定库存 SKU")
+	if !canEditSelfOrderCost(oHead.Status) {
+		return nil, fmt.Errorf("已完成/已取消的自营单不可绑定库存 SKU")
 	}
 	it.InvSkuID = in.InvSkuID
 	it.InvSkuCode = strings.TrimSpace(in.InvSkuCode)
@@ -269,8 +269,8 @@ func (s *SelfOrderService) UpdateItemCost(itemID uint64, in *dto.UpdateItemCostI
 	if err != nil {
 		return nil, err
 	}
-	if oHead.Status != model.SelfOrderStatusDraft {
-		return nil, fmt.Errorf("仅草稿自营单可修改成本价")
+	if !canEditSelfOrderCost(oHead.Status) {
+		return nil, fmt.Errorf("已完成/已取消的自营单不可修改成本价")
 	}
 	if in.CostUnitPrice < 0 {
 		return nil, fmt.Errorf("成本单价不能为负")
@@ -1644,7 +1644,9 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 
 // resolveSelfOrderCreatePay 创建时确定单据状态与付款：
 // - 电商(kdzs)或显式 payStatus=paid → 已付款
-// - 手工单（含关联销售单）→ 草稿，待填成本后提交
+// - 手工单 → 已下单（未付），便于直接填物流发货；成本可在完成前补填
+// - 其它有关联销售单 → 已下单（未付）
+// - 无关联 → 草稿
 func isEcommerceSelfOrder(o *model.SelfOrder) bool {
 	if o == nil {
 		return false
@@ -1652,8 +1654,16 @@ func isEcommerceSelfOrder(o *model.SelfOrder) bool {
 	return strings.EqualFold(strings.TrimSpace(o.SourceChannel), "kdzs")
 }
 
-// - 其它有关联销售单 → 已下单（未付）
-// - 无关联 → 草稿
+// canEditSelfOrderCost 完成/取消前允许改成本、绑库存 SKU。
+func canEditSelfOrderCost(status string) bool {
+	switch strings.TrimSpace(status) {
+	case model.SelfOrderStatusCompleted, model.SelfOrderStatusCancelled:
+		return false
+	default:
+		return true
+	}
+}
+
 func resolveSelfOrderCreatePay(in *dto.SelfOrderInput) (status, payStatus string, paidAt *time.Time) {
 	status = model.SelfOrderStatusOrdered
 	payStatus = model.DistPayStatusUnpaid
@@ -1673,7 +1683,11 @@ func resolveSelfOrderCreatePay(in *dto.SelfOrderInput) (status, payStatus string
 		}
 		return status, payStatus, paidAt
 	}
-	if channel == "manual" || in.RefSoID == 0 {
+	if channel == "manual" {
+		// 手工单默认已下单，可直接发货；成本完成前仍可改
+		return model.SelfOrderStatusOrdered, model.DistPayStatusUnpaid, nil
+	}
+	if in.RefSoID == 0 {
 		status = model.SelfOrderStatusDraft
 	}
 	return status, payStatus, nil
