@@ -119,15 +119,25 @@ func (r *ShipmentRepo) RemapItemDistOrderItemIDs(oldToNew map[uint64]uint64) err
 }
 
 func (r *ShipmentRepo) NextShipmentNo() (string, error) {
+	// 取当日最大单号 +1；COUNT+1 在删单留洞时会撞唯一索引
 	prefix := "SH" + time.Now().Format("20060102")
-	var count int64
+	var last string
 	if err := r.db.Model(&model.DistShipment{}).
 		Scopes(scopeTenant(r.tenantID)).
 		Where("shipment_no LIKE ?", prefix+"%").
-		Count(&count).Error; err != nil {
+		Order("shipment_no DESC").
+		Limit(1).
+		Pluck("shipment_no", &last).Error; err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s%04d", prefix, count+1), nil
+	seq := 1
+	if last != "" && len(last) > len(prefix) {
+		var n int
+		if _, scanErr := fmt.Sscanf(last[len(prefix):], "%d", &n); scanErr == nil && n >= 0 {
+			seq = n + 1
+		}
+	}
+	return fmt.Sprintf("%s%04d", prefix, seq), nil
 }
 
 type ReceiptRepo struct {
