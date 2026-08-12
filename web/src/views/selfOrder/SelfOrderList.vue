@@ -47,7 +47,6 @@ const filters = reactive({
   payStatus: '',
   createdRange: last7DaysDateTimeRange() as [string, string] | null,
   orderedRange: null as [string, string] | null,
-  shippedRange: null as [string, string] | null,
 })
 
 function statusLabel(s: string) {
@@ -247,10 +246,6 @@ async function load() {
       params.orderedAtStart = filters.orderedRange[0]
       params.orderedAtEnd = filters.orderedRange[1]
     }
-    if (filters.shippedRange?.length === 2) {
-      params.shippedAtStart = filters.shippedRange[0]
-      params.shippedAtEnd = filters.shippedRange[1]
-    }
     const data = await listSelfOrders(params as Parameters<typeof listSelfOrders>[0])
     list.value = data.list || []
     total.value = data.total || 0
@@ -288,7 +283,6 @@ function resetFilters() {
   excludeStatusesFilter.value = ''
   filters.createdRange = last7DaysDateTimeRange()
   filters.orderedRange = null
-  filters.shippedRange = null
   onFilterChange()
 }
 
@@ -456,21 +450,6 @@ onUnmounted(() => stopIntentListen())
         <el-form-item label="下单时间">
           <el-date-picker
             v-model="filters.orderedRange"
-            type="datetimerange"
-            range-separator="至"
-            start-placeholder="开始"
-            end-placeholder="结束"
-            value-format="YYYY-MM-DD HH:mm:ss"
-            :shortcuts="dateShortcuts"
-            :default-time="dateRangeDefaultTime"
-            clearable
-            style="width: 360px"
-            @change="onFilterChange"
-          />
-        </el-form-item>
-        <el-form-item label="发货时间">
-          <el-date-picker
-            v-model="filters.shippedRange"
             type="datetimerange"
             range-separator="至"
             start-placeholder="开始"
