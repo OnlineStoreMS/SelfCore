@@ -20,6 +20,8 @@ type SelfOrder struct {
 	SourceChannel string     `gorm:"size:32;index" json:"sourceChannel"`
 	Platform      string     `gorm:"size:32" json:"platform"`
 	ShopName      string     `gorm:"size:128" json:"shopName"`
+	// ManualSourceName 手工单订单来源名称（来自 OrderCore 手工订单来源字典）
+	ManualSourceName string `gorm:"size:128" json:"manualSourceName"`
 	BuyerRemark   string     `gorm:"type:text" json:"buyerRemark"`
 	SellerRemark  string     `gorm:"type:text" json:"sellerRemark"`
 	FenFaRemark   string     `gorm:"type:text" json:"fenFaRemark"`

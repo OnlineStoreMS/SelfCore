@@ -40,8 +40,34 @@ type SelfOrderListFilter struct {
 	PageSize       int
 }
 
-func (r *SelfOrderRepo) List(f SelfOrderListFilter) ([]model.SelfOrder, int64, error) {
-	q := r.db.Model(&model.SelfOrder{}).Scopes(scopeTenant(r.tenantID))
+// applySelfOrderContextFilters 时间/关键词等上下文条件（不含 status / payStatus / shipStatus）。
+func (r *SelfOrderRepo) applySelfOrderContextFilters(q *gorm.DB, f SelfOrderListFilter) *gorm.DB {
+	if f.RefSoID > 0 {
+		q = q.Where("ref_so_id = ?", f.RefSoID)
+	}
+	if kw := strings.TrimSpace(f.Keyword); kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where(
+			"so_no ILIKE ? OR ref_trace_id ILIKE ? OR buyer_name ILIKE ? OR buyer_phone ILIKE ?",
+			like, like, like, like,
+		)
+	}
+	if f.OrderedAtStart != nil {
+		q = q.Where("COALESCE(ordered_at, created_at) >= ?", *f.OrderedAtStart)
+	}
+	if f.OrderedAtEnd != nil {
+		q = q.Where("COALESCE(ordered_at, created_at) <= ?", *f.OrderedAtEnd)
+	}
+	if f.ShippedAtStart != nil {
+		q = q.Where("shipped_at >= ?", *f.ShippedAtStart)
+	}
+	if f.ShippedAtEnd != nil {
+		q = q.Where("shipped_at <= ?", *f.ShippedAtEnd)
+	}
+	return q
+}
+
+func (r *SelfOrderRepo) applySelfOrderStatusFilters(q *gorm.DB, f SelfOrderListFilter) *gorm.DB {
 	if len(f.Statuses) > 0 {
 		q = q.Where("status IN ?", f.Statuses)
 	} else if f.Status != "" {
@@ -67,25 +93,13 @@ func (r *SelfOrderRepo) List(f SelfOrderListFilter) ([]model.SelfOrder, int64, e
 			model.SelfOrderStatusCompleted,
 		})
 	}
-	if f.RefSoID > 0 {
-		q = q.Where("ref_so_id = ?", f.RefSoID)
-	}
-	if kw := strings.TrimSpace(f.Keyword); kw != "" {
-		like := "%" + kw + "%"
-		q = q.Where("so_no ILIKE ? OR ref_trace_id ILIKE ?", like, like)
-	}
-	if f.OrderedAtStart != nil {
-		q = q.Where("COALESCE(ordered_at, created_at) >= ?", *f.OrderedAtStart)
-	}
-	if f.OrderedAtEnd != nil {
-		q = q.Where("COALESCE(ordered_at, created_at) <= ?", *f.OrderedAtEnd)
-	}
-	if f.ShippedAtStart != nil {
-		q = q.Where("shipped_at >= ?", *f.ShippedAtStart)
-	}
-	if f.ShippedAtEnd != nil {
-		q = q.Where("shipped_at <= ?", *f.ShippedAtEnd)
-	}
+	return q
+}
+
+func (r *SelfOrderRepo) List(f SelfOrderListFilter) ([]model.SelfOrder, int64, error) {
+	q := r.db.Model(&model.SelfOrder{}).Scopes(scopeTenant(r.tenantID))
+	q = r.applySelfOrderContextFilters(q, f)
+	q = r.applySelfOrderStatusFilters(q, f)
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -101,6 +115,55 @@ func (r *SelfOrderRepo) List(f SelfOrderListFilter) ([]model.SelfOrder, int64, e
 	err := q.Order("COALESCE(ordered_at, created_at) DESC, id DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	return list, total, err
+}
+
+// SelfOrderStatusCounts 列表页状态筛选数量（与时间/关键词上下文一致，不含当前 status 筛选）。
+type SelfOrderStatusCounts struct {
+	All      int64            `json:"all"`
+	ByStatus map[string]int64 `json:"byStatus"`
+	WaitShip int64            `json:"waitShip"`
+	Unpaid   int64            `json:"unpaid"`
+}
+
+func (r *SelfOrderRepo) CountStatusFacets(f SelfOrderListFilter) (*SelfOrderStatusCounts, error) {
+	newBase := func() *gorm.DB {
+		return r.applySelfOrderContextFilters(
+			r.db.Model(&model.SelfOrder{}).Scopes(scopeTenant(r.tenantID)),
+			f,
+		)
+	}
+
+	out := &SelfOrderStatusCounts{ByStatus: map[string]int64{}}
+	if err := newBase().Count(&out.All).Error; err != nil {
+		return nil, err
+	}
+
+	type statusRow struct {
+		Status string
+		Cnt    int64
+	}
+	var rows []statusRow
+	if err := newBase().
+		Select("status, count(*) as cnt").
+		Group("status").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out.ByStatus[row.Status] = row.Cnt
+		switch row.Status {
+		case model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid, model.SelfOrderStatusConfirmed:
+			out.WaitShip += row.Cnt
+		}
+	}
+
+	if err := newBase().
+		Where("pay_status IN ?", []string{model.DistPayStatusUnpaid, model.DistPayStatusPartial}).
+		Where("status NOT IN ?", []string{model.SelfOrderStatusDraft, model.SelfOrderStatusCancelled}).
+		Count(&out.Unpaid).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *SelfOrderRepo) GetByID(id uint64) (*model.SelfOrder, error) {

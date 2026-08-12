@@ -37,6 +37,10 @@ func (s *SelfOrderService) ForTenant(tenantID uint64) *SelfOrderService {
 	}
 }
 
+func (s *SelfOrderService) CountStatusFacets(f repo.SelfOrderListFilter) (*repo.SelfOrderStatusCounts, error) {
+	return s.repos.SelfOrder.ForTenant(s.tenantID).CountStatusFacets(f)
+}
+
 func (s *SelfOrderService) List(f repo.SelfOrderListFilter) ([]dto.SelfOrderListItem, int64, error) {
 	list, total, err := s.repos.SelfOrder.ForTenant(s.tenantID).List(f)
 	if err != nil {
@@ -55,7 +59,9 @@ func (s *SelfOrderService) List(f repo.SelfOrderListFilter) ([]dto.SelfOrderList
 			RefSoID: o.RefSoID, RefTraceID: o.RefTraceID,
 			SaleAmount: o.SaleAmount, CostAmount: o.CostAmount,
 			PayStatus: firstNonEmpty(o.PayStatus, model.DistPayStatusUnpaid),
+			BuyerName: o.BuyerName, BuyerPhone: o.BuyerPhone,
 			SourceChannel: o.SourceChannel, Platform: o.Platform, ShopName: o.ShopName,
+			ManualSourceName: o.ManualSourceName,
 			BuyerRemark: o.BuyerRemark, SellerRemark: o.SellerRemark,
 			FenFaRemark: o.FenFaRemark, PrinterRemark: o.PrinterRemark,
 			StockDeducted: o.StockDeducted, StockError: o.StockError,
@@ -192,10 +198,14 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 			SourceChannel: strings.TrimSpace(in.SourceChannel),
 			Platform:      strings.TrimSpace(in.Platform),
 			ShopName:      strings.TrimSpace(in.ShopName),
+			ManualSourceName: strings.TrimSpace(in.ManualSourceName),
 			BuyerRemark:   strings.TrimSpace(in.BuyerRemark),
 			SellerRemark:  strings.TrimSpace(in.SellerRemark),
 			FenFaRemark:   strings.TrimSpace(in.FenFaRemark),
 			PrinterRemark: strings.TrimSpace(in.PrinterRemark),
+		}
+		if o.ShopName == "" && o.ManualSourceName != "" {
+			o.ShopName = o.ManualSourceName
 		}
 		if t := parseDateTime(in.OrderedAt); t != nil {
 			o.OrderedAt = t
@@ -1541,12 +1551,8 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 	}
 	switch {
 	case fullyShipped && hasShipped:
-		// 自营无「到货」环节：全部发出即完成
-		o.Status = model.SelfOrderStatusCompleted
-		if o.CompletedAt == nil {
-			now := time.Now()
-			o.CompletedAt = &now
-		}
+		// 全部明细发完 → 已发货（可再点「完成」归档）
+		o.Status = model.SelfOrderStatusShipped
 	case hasShipped:
 		o.Status = model.SelfOrderStatusPartialShipped
 	}
@@ -1609,6 +1615,7 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 		BuyerName: o.BuyerName, BuyerPhone: o.BuyerPhone, Address: o.Address,
 		Remark: o.Remark,
 		SourceChannel: o.SourceChannel, Platform: o.Platform, ShopName: o.ShopName,
+		ManualSourceName: o.ManualSourceName,
 		BuyerRemark: o.BuyerRemark, SellerRemark: o.SellerRemark,
 		FenFaRemark: o.FenFaRemark, PrinterRemark: o.PrinterRemark,
 		StockDeducted: o.StockDeducted, StockError: o.StockError,

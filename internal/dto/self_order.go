@@ -32,6 +32,8 @@ type SelfOrderInput struct {
 	SourceChannel string               `json:"sourceChannel"`
 	Platform      string               `json:"platform"`
 	ShopName      string               `json:"shopName"`
+	// ManualSourceName 手工单订单来源名称
+	ManualSourceName string               `json:"manualSourceName"`
 	BuyerRemark   string               `json:"buyerRemark"`
 	SellerRemark  string               `json:"sellerRemark"`
 	FenFaRemark   string               `json:"fenFaRemark"`
@@ -54,9 +56,12 @@ type SelfOrderListItem struct {
 	CostAmount    float64 `json:"costAmount"`
 	PayStatus     string  `json:"payStatus"`
 	PaidAt        string  `json:"paidAt,omitempty"`
+	BuyerName     string  `json:"buyerName"`
+	BuyerPhone    string  `json:"buyerPhone"`
 	SourceChannel string  `json:"sourceChannel"`
 	Platform      string  `json:"platform"`
 	ShopName      string  `json:"shopName"`
+	ManualSourceName string `json:"manualSourceName"`
 	BuyerRemark   string  `json:"buyerRemark"`
 	SellerRemark  string  `json:"sellerRemark"`
 	FenFaRemark   string  `json:"fenFaRemark"`
@@ -107,6 +112,7 @@ type SelfOrderDetail struct {
 	SourceChannel string             `json:"sourceChannel"`
 	Platform      string             `json:"platform"`
 	ShopName      string             `json:"shopName"`
+	ManualSourceName string          `json:"manualSourceName"`
 	BuyerRemark   string             `json:"buyerRemark"`
 	SellerRemark  string             `json:"sellerRemark"`
 	FenFaRemark   string             `json:"fenFaRemark"`

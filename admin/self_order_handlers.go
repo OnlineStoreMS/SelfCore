@@ -29,10 +29,9 @@ func (h *SelfOrderHandler) ps(c *gin.Context) *service.SelfOrderService {
 	return h.svc.ForTenant(authcontext.TenantID(c))
 }
 
-func (h *SelfOrderHandler) List(c *gin.Context) {
-	page, pageSize := httputil.ParsePage(c)
+func (h *SelfOrderHandler) listFilterFromQuery(c *gin.Context) repo.SelfOrderListFilter {
 	refSoID, _ := strconv.ParseUint(c.Query("refSoId"), 10, 64)
-	list, total, err := h.ps(c).List(repo.SelfOrderListFilter{
+	return repo.SelfOrderListFilter{
 		Status: c.Query("status"), Statuses: splitCSV(c.Query("statuses")),
 		ExcludeStatuses: splitCSV(c.Query("excludeStatuses")),
 		PayStatuses:     splitCSV(c.Query("payStatus")),
@@ -42,13 +41,32 @@ func (h *SelfOrderHandler) List(c *gin.Context) {
 		OrderedAtEnd:   parseDateTimeInclusiveEnd(c.Query("orderedAtEnd")),
 		ShippedAtStart: parsePOCreatedAtStart(c.Query("shippedAtStart")),
 		ShippedAtEnd:   parseDateTimeInclusiveEnd(c.Query("shippedAtEnd")),
-		Page: page, PageSize: pageSize,
-	})
+	}
+}
+
+func (h *SelfOrderHandler) List(c *gin.Context) {
+	page, pageSize := httputil.ParsePage(c)
+	f := h.listFilterFromQuery(c)
+	f.Page, f.PageSize = page, pageSize
+	list, total, err := h.ps(c).List(f)
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 	response.OK(c, response.PageResult(list, total, page, pageSize))
+}
+
+// StatusCounts 自营单状态数量（按时间/关键词上下文，不含 status 筛选本身）。
+func (h *SelfOrderHandler) StatusCounts(c *gin.Context) {
+	f := h.listFilterFromQuery(c)
+	// 数量统计忽略当前状态/付款筛选，避免 tab 数字随选中项变空
+	f.Status, f.Statuses, f.ExcludeStatuses, f.PayStatuses, f.ShipStatus = "", nil, nil, nil, ""
+	counts, err := h.ps(c).CountStatusFacets(f)
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(c, counts)
 }
 
 func (h *SelfOrderHandler) Get(c *gin.Context) {

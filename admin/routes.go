@@ -12,6 +12,7 @@ func RegisterRoutes(g *gin.RouterGroup, distributorH *DistributorHandler, priceH
 	g.POST("/orders/:id/ship", orderH.Ship)
 
 	g.GET("/self-orders", selfOrderH.List)
+	g.GET("/self-orders/status-counts", selfOrderH.StatusCounts)
 	g.POST("/self-orders", selfOrderH.Create)
 	g.POST("/self-orders/cancel-by-ref-so", selfOrderH.CancelByRefSo)
 	g.GET("/self-orders/:id", selfOrderH.Get)

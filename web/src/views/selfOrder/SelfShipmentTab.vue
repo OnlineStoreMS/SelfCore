@@ -270,6 +270,17 @@ function shipmentSalesOrders(row: SelfShipment) {
   return [...nos].join('、') || '—'
 }
 
+function lineLogisticsText(itemId: number) {
+  const texts: string[] = []
+  for (const sh of list.value) {
+    const hit = (sh.items || []).some((it) => it.selfOrderItemId === itemId)
+    if (!hit) continue
+    const t = [sh.carrierName, sh.trackingNo].filter(Boolean).join(' ')
+    if (t && !texts.includes(t)) texts.push(t)
+  }
+  return texts.join('；') || '—'
+}
+
 async function loadData() {
   loading.value = true
   try {
@@ -330,18 +341,24 @@ async function fillReceiverFromOrder(soId: number) {
   }
 }
 
-async function openCreateDropship(group: SalesOrderGroup) {
+async function openCreateDropship(group: SalesOrderGroup, preferItemId?: number) {
   if (group.remainingQty <= 0) {
     ElMessage.warning('该销售单明细已全部关联物流')
     return
   }
   resetForm()
   activeGroupKey.value = group.key
-  linePicks.value = group.lines.map((l) => ({
-    ...l,
-    selected: l.remaining > 0,
-    shipQty: l.remaining > 0 ? l.remaining : 1,
-  }))
+  const prefer = preferItemId && preferItemId > 0 ? preferItemId : 0
+  linePicks.value = group.lines.map((l) => {
+    const canShip = l.remaining > 0
+    // 指定行发货时默认只勾该行；否则可勾选全部待发（可再取消）
+    const selected = canShip && (!prefer || l.selfOrderItemId === prefer)
+    return {
+      ...l,
+      selected,
+      shipQty: canShip ? l.remaining : 1,
+    }
+  })
   dialogVisible.value = true
   await fillReceiverFromOrder(group.refSoId)
 }
@@ -349,7 +366,7 @@ async function openCreateDropship(group: SalesOrderGroup) {
 async function handleSave() {
   const selected = linePicks.value.filter((l) => l.selected && l.remaining > 0)
   if (!selected.length) {
-    ElMessage.warning('该销售单没有可发货明细')
+    ElMessage.warning('请勾选要发货的商品明细')
     return
   }
   for (const line of selected) {
@@ -554,7 +571,7 @@ const activeGroup = computed(() =>
   <div v-loading="loading">
     <div v-if="!readonly" class="toolbar">
       <el-button type="primary" plain :loading="syncing" @click="handleSyncFromOrders()">同步物流</el-button>
-      <span class="hint">自营发货会回传订单中心并扣仓储库存；也可「回传单号」单独补传</span>
+      <span class="hint">支持按商品分批发货（一商品可对应一个快递单号）；全部发出后单据为「已发货」，否则「部分发货」</span>
     </div>
 
     <el-table :data="soGroupRows" border stripe class="so-group-table" row-key="key">
@@ -569,6 +586,9 @@ const activeGroup = computed(() =>
           <span :class="{ muted: row.line.remaining <= 0 }">{{ row.line.remaining }}</span>
         </template>
       </el-table-column>
+      <el-table-column label="物流" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">{{ lineLogisticsText(row.line.selfOrderItemId) }}</template>
+      </el-table-column>
       <el-table-column label="状态" width="100" align="center">
         <template #default="{ row }">{{ row.lineStatus }}</template>
       </el-table-column>
@@ -577,8 +597,8 @@ const activeGroup = computed(() =>
           <el-button
             type="primary"
             link
-            :disabled="row.group.remainingQty <= 0"
-            @click="openCreateDropship(row.group)"
+            :disabled="row.line.remaining <= 0"
+            @click="openCreateDropship(row.group, row.line.selfOrderItemId)"
           >
             发货
           </el-button>
@@ -693,6 +713,11 @@ const activeGroup = computed(() =>
         </el-form-item>
         <el-form-item label="发货明细" required>
           <el-table :data="linePicks" border size="small" max-height="280">
+            <el-table-column width="48" align="center">
+              <template #default="{ row }">
+                <el-checkbox v-model="row.selected" :disabled="row.remaining <= 0" />
+              </template>
+            </el-table-column>
             <el-table-column label="图片" width="56" align="center">
               <template #default="{ row }">
                 <el-image
@@ -729,6 +754,7 @@ const activeGroup = computed(() =>
               </template>
             </el-table-column>
           </el-table>
+          <div class="hint" style="margin-top: 6px">勾选本次要发的商品；不同商品可分批登记，各自填写快递单号</div>
           <div v-if="!linePicks.some((l) => l.remaining > 0)" class="hint warn">
             全部明细已关联物流，如需改绑请先删除旧发货批次
           </div>
