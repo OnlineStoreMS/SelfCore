@@ -99,12 +99,13 @@ func (r *SelfOrderRepo) applySelfOrderStatusFilters(q *gorm.DB, f SelfOrderListF
 	}
 	switch f.ShipStatus {
 	case "wait_ship":
-		// 待发货：尚未开始发货（含草稿）
+		// 待发货：仍有待发（含未开始发货 + 部分发货）；「部分发货」可单独再筛
 		q = q.Where("status IN ?", []string{
 			model.SelfOrderStatusDraft,
 			model.SelfOrderStatusOrdered,
 			model.SelfOrderStatusPaid,
 			model.SelfOrderStatusConfirmed,
+			model.SelfOrderStatusPartialShipped,
 		})
 	case "partial_shipped":
 		q = q.Where("status = ?", model.SelfOrderStatusPartialShipped)
@@ -174,7 +175,8 @@ func (r *SelfOrderRepo) CountStatusFacets(f SelfOrderListFilter) (*SelfOrderStat
 	for _, row := range rows {
 		out.ByStatus[row.Status] = row.Cnt
 		switch row.Status {
-		case model.SelfOrderStatusDraft, model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid, model.SelfOrderStatusConfirmed:
+		case model.SelfOrderStatusDraft, model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid,
+			model.SelfOrderStatusConfirmed, model.SelfOrderStatusPartialShipped:
 			out.WaitShip += row.Cnt
 		}
 	}
