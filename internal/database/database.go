@@ -29,7 +29,8 @@ func Connect(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		// Warn：保留慢查询提示，避免 AutoMigrate 刷屏 Info SQL
+		Logger: logger.Default.LogMode(logger.Warn),
 	})
 	if err != nil {
 		return nil, err
