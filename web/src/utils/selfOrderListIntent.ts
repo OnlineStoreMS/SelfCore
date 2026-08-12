@@ -9,8 +9,9 @@ export type SelfOrderListIntent = {
   /** 发货状态：wait_ship | partial_shipped | shipped */
   shipStatus?: string
   excludeStatuses?: string[]
-  /** 工作台「今日」 */
+  /** 工作台「今日」（按创建自营单时间 created_at） */
   today?: boolean
+  /** 创建日范围 YYYY-MM-DD（映射到 createdAtStart/End） */
   orderedDateStart?: string
   orderedDateEnd?: string
 }

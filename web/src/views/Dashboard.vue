@@ -563,7 +563,7 @@ onUnmounted(() => {
       <div class="charts">
         <section>
           <h3>自营单量 / 销售额</h3>
-          <p class="chart-tip">按业务日；仅统计未取消的自营订单</p>
+          <p class="chart-tip">按创建日；仅统计未取消的自营订单</p>
           <div ref="volumeChartEl" class="chart" />
         </section>
         <section>

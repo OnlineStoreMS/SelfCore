@@ -381,6 +381,7 @@ async function confirmBindSku(sku: WarehouseSku) {
             <el-descriptions-item label="买家">{{ order.buyerName || '—' }}</el-descriptions-item>
             <el-descriptions-item label="手机">{{ order.buyerPhone || '—' }}</el-descriptions-item>
             <el-descriptions-item label="地址" :span="2">{{ order.address || '—' }}</el-descriptions-item>
+            <el-descriptions-item label="创建时间">{{ order.createdAt || '—' }}</el-descriptions-item>
             <el-descriptions-item label="下单时间">{{ order.orderedAt || '—' }}</el-descriptions-item>
             <el-descriptions-item label="发货时间">{{ order.shippedAt || '—' }}</el-descriptions-item>
             <el-descriptions-item label="备注" :span="2">{{ order.remark || '—' }}</el-descriptions-item>

@@ -43,7 +43,7 @@ const filters = reactive({
   keyword: '',
   shipStatus: '',
   status: '',
-  orderedRange: last7DaysDateTimeRange() as [string, string] | null,
+  createdRange: last7DaysDateTimeRange() as [string, string] | null,
   shippedRange: null as [string, string] | null,
 })
 
@@ -210,12 +210,12 @@ function applyListIntent() {
     excludeStatusesFilter.value = intent.excludeStatuses.join(',')
   }
   if (intent.orderedDateStart && intent.orderedDateEnd) {
-    filters.orderedRange = [
+    filters.createdRange = [
       `${intent.orderedDateStart} 00:00:00`,
       `${intent.orderedDateEnd} 23:59:59`,
     ]
   } else if (intent.today) {
-    filters.orderedRange = todayDateTimeRange()
+    filters.createdRange = todayDateTimeRange()
   }
   filters.page = 1
 }
@@ -233,9 +233,9 @@ async function load() {
       payStatus: payStatusesFilter.value || undefined,
       excludeStatuses: excludeStatusesFilter.value || undefined,
     }
-    if (filters.orderedRange?.length === 2) {
-      params.orderedAtStart = filters.orderedRange[0]
-      params.orderedAtEnd = filters.orderedRange[1]
+    if (filters.createdRange?.length === 2) {
+      params.createdAtStart = filters.createdRange[0]
+      params.createdAtEnd = filters.createdRange[1]
     }
     if (filters.shippedRange?.length === 2) {
       params.shippedAtStart = filters.shippedRange[0]
@@ -270,7 +270,7 @@ function resetFilters() {
   statusesFilter.value = ''
   payStatusesFilter.value = ''
   excludeStatusesFilter.value = ''
-  filters.orderedRange = last7DaysDateTimeRange()
+  filters.createdRange = last7DaysDateTimeRange()
   filters.shippedRange = null
   onFilterChange()
 }
@@ -394,9 +394,9 @@ onUnmounted(() => stopIntentListen())
             <el-option label="已发货" value="shipped" />
           </el-select>
         </el-form-item>
-        <el-form-item label="下单时间">
+        <el-form-item label="创建时间">
           <el-date-picker
-            v-model="filters.orderedRange"
+            v-model="filters.createdRange"
             type="datetimerange"
             range-separator="至"
             start-placeholder="开始"
@@ -457,7 +457,7 @@ onUnmounted(() => stopIntentListen())
       :data="list"
       stripe
       class="table"
-      :default-sort="{ prop: 'orderedAt', order: 'descending' }"
+      :default-sort="{ prop: 'createdAt', order: 'descending' }"
       @row-click="openDetail"
     >
       <el-table-column prop="soNo" label="自营单号" min-width="130" show-overflow-tooltip />
@@ -520,8 +520,11 @@ onUnmounted(() => stopIntentListen())
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="下单时间" prop="orderedAt" width="168" fixed="right" class-name="col-nowrap">
-        <template #default="{ row }">{{ formatDateTime(row.orderedAt || row.createdAt) }}</template>
+      <el-table-column label="下单时间" prop="orderedAt" width="168" class-name="col-nowrap">
+        <template #default="{ row }">{{ formatDateTime(row.orderedAt) || '—' }}</template>
+      </el-table-column>
+      <el-table-column label="创建时间" prop="createdAt" width="168" fixed="right" class-name="col-nowrap">
+        <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">

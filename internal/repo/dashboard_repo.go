@@ -87,13 +87,13 @@ func (r *DashboardRepo) CountUnpaidSelfOrdersSince(dayStart *time.Time) (int64, 
 	return n, err
 }
 
-// scopeSelfOrderBusinessDay 按业务日：COALESCE(ordered_at, created_at) ∈ [dayStart, dayStart+1)
+// scopeSelfOrderBusinessDay 按创建自营单日：created_at ∈ [dayStart, dayStart+1)
 func scopeSelfOrderBusinessDay(q *gorm.DB, dayStart *time.Time) *gorm.DB {
 	if dayStart == nil {
 		return q
 	}
 	end := dayStart.Add(24 * time.Hour)
-	return q.Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", *dayStart, end)
+	return q.Where("created_at >= ? AND created_at < ?", *dayStart, end)
 }
 
 func (r *DashboardRepo) CountPOsByStatus(status string) (int64, error) {
@@ -226,7 +226,7 @@ func (r *DashboardRepo) SumSelfCostAmountOnDay(dayStart time.Time) (float64, err
 	err := r.db.Model(&model.SelfOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
 		Where("status <> ?", model.SelfOrderStatusCancelled).
-		Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", dayStart, end).
+		Where("created_at >= ? AND created_at < ?", dayStart, end).
 		Select("COALESCE(SUM(cost_amount), 0)").
 		Scan(&sum).Error
 	return sum, err
@@ -238,7 +238,7 @@ func (r *DashboardRepo) SumSelfCostAmountSince(since time.Time) (float64, error)
 	err := r.db.Model(&model.SelfOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
 		Where("status <> ?", model.SelfOrderStatusCancelled).
-		Where("COALESCE(ordered_at, created_at) >= ?", since).
+		Where("created_at >= ?", since).
 		Select("COALESCE(SUM(cost_amount), 0)").
 		Scan(&sum).Error
 	return sum, err
@@ -277,7 +277,7 @@ func (r *DashboardRepo) SumSelfSaleAmountOnDay(dayStart time.Time) (float64, err
 	err := r.db.Model(&model.SelfOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
 		Where("status <> ?", model.SelfOrderStatusCancelled).
-		Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", dayStart, end).
+		Where("created_at >= ? AND created_at < ?", dayStart, end).
 		Select("COALESCE(SUM(sale_amount), 0)").
 		Scan(&sum).Error
 	return sum, err
@@ -289,7 +289,7 @@ func (r *DashboardRepo) SumSelfSaleAmountSince(since time.Time) (float64, error)
 	err := r.db.Model(&model.SelfOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
 		Where("status <> ?", model.SelfOrderStatusCancelled).
-		Where("COALESCE(ordered_at, created_at) >= ?", since).
+		Where("created_at >= ?", since).
 		Select("COALESCE(SUM(sale_amount), 0)").
 		Scan(&sum).Error
 	return sum, err
@@ -307,7 +307,7 @@ func (r *DashboardRepo) SumSelfSaleAndCostWithCostOnDay(dayStart time.Time) (sal
 		Scopes(scopeTenant(r.tenantID)).
 		Where("status <> ?", model.SelfOrderStatusCancelled).
 		Where("cost_amount > 0").
-		Where("COALESCE(ordered_at, created_at) >= ? AND COALESCE(ordered_at, created_at) < ?", dayStart, end).
+		Where("created_at >= ? AND created_at < ?", dayStart, end).
 		Select("COALESCE(SUM(sale_amount), 0) as sale_amount, COALESCE(SUM(cost_amount), 0) as cost_amount").
 		Scan(&out).Error
 	return out.SaleAmount, out.CostAmount, err
@@ -469,6 +469,7 @@ func NormalizeDashboardRange(start, end time.Time) (time.Time, time.Time, error)
 }
 
 const sqlPOBizDay = `COALESCE(ordered_at, created_at)`
+const sqlSelfBizDay = `created_at`
 
 // DailyAllTypesTrend 自营+全部分销按日趋势。
 // 销售额/成本额含全部订单；毛利润仅统计成本额 > 0 的订单。
@@ -501,13 +502,13 @@ func (r *DashboardRepo) DailyAllTypesTrend(start, end time.Time) (points []dto.D
 	var selfRows []dayAgg
 	err = r.db.Model(&model.SelfOrder{}).
 		Scopes(scopeTenant(r.tenantID)).
-		Select(`to_char(date_trunc('day', `+sqlPOBizDay+`), 'YYYY-MM-DD') as day,
+		Select(`to_char(date_trunc('day', `+sqlSelfBizDay+`), 'YYYY-MM-DD') as day,
 			COUNT(*) as order_count,
 			COALESCE(SUM(sale_amount), 0) as sale_amount,
 			COALESCE(SUM(cost_amount), 0) as cost_amount,
 			COALESCE(SUM(CASE WHEN cost_amount > 0 THEN sale_amount - cost_amount ELSE 0 END), 0) as profit_amount`).
 		Where("status <> ?", model.SelfOrderStatusCancelled).
-		Where(sqlPOBizDay+" >= ? AND "+sqlPOBizDay+" < ?", start, endExclusive).
+		Where(sqlSelfBizDay+" >= ? AND "+sqlSelfBizDay+" < ?", start, endExclusive).
 		Group("day").
 		Order("day ASC").
 		Scan(&selfRows).Error

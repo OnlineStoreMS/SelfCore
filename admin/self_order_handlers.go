@@ -37,8 +37,8 @@ func (h *SelfOrderHandler) listFilterFromQuery(c *gin.Context) repo.SelfOrderLis
 		PayStatuses:     splitCSV(c.Query("payStatus")),
 		RefSoID: refSoID, Keyword: c.Query("keyword"),
 		ShipStatus:     c.Query("shipStatus"),
-		OrderedAtStart: parsePOCreatedAtStart(c.Query("orderedAtStart")),
-		OrderedAtEnd:   parseDateTimeInclusiveEnd(c.Query("orderedAtEnd")),
+		CreatedAtStart: parsePOCreatedAtStart(firstNonEmptyQuery(c, "createdAtStart", "orderedAtStart")),
+		CreatedAtEnd:   parseDateTimeInclusiveEnd(firstNonEmptyQuery(c, "createdAtEnd", "orderedAtEnd")),
 		ShippedAtStart: parsePOCreatedAtStart(c.Query("shippedAtStart")),
 		ShippedAtEnd:   parseDateTimeInclusiveEnd(c.Query("shippedAtEnd")),
 	}
@@ -603,4 +603,14 @@ func parseDateTimeInclusiveEnd(s string) *time.Time {
 		}
 	}
 	return nil
+}
+
+
+func firstNonEmptyQuery(c *gin.Context, keys ...string) string {
+	for _, k := range keys {
+		if v := strings.TrimSpace(c.Query(k)); v != "" {
+			return v
+		}
+	}
+	return ""
 }

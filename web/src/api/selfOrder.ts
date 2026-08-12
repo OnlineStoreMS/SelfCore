@@ -192,6 +192,9 @@ export async function listSelfOrders(params: {
   shipStatus?: string
   refSoId?: number
   keyword?: string
+  createdAtStart?: string
+  createdAtEnd?: string
+  /** @deprecated 兼容旧参数，后端按创建时间处理 */
   orderedAtStart?: string
   orderedAtEnd?: string
   shippedAtStart?: string

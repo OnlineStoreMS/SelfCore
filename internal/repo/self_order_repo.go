@@ -31,9 +31,10 @@ type SelfOrderListFilter struct {
 	PayStatuses     []string
 	RefSoID        uint64
 	Keyword        string
-	ShipStatus     string // wait_ship | shipped（按 status 推导）
-	OrderedAtStart *time.Time
-	OrderedAtEnd   *time.Time
+	ShipStatus     string // wait_ship | partial_shipped | shipped
+	// CreatedAt* 按创建自营单时间筛选（非销售单下单时间）
+	CreatedAtStart *time.Time
+	CreatedAtEnd   *time.Time
 	ShippedAtStart *time.Time
 	ShippedAtEnd   *time.Time
 	Page           int
@@ -52,11 +53,11 @@ func (r *SelfOrderRepo) applySelfOrderContextFilters(q *gorm.DB, f SelfOrderList
 			like, like, like, like,
 		)
 	}
-	if f.OrderedAtStart != nil {
-		q = q.Where("COALESCE(ordered_at, created_at) >= ?", *f.OrderedAtStart)
+	if f.CreatedAtStart != nil {
+		q = q.Where("created_at >= ?", *f.CreatedAtStart)
 	}
-	if f.OrderedAtEnd != nil {
-		q = q.Where("COALESCE(ordered_at, created_at) <= ?", *f.OrderedAtEnd)
+	if f.CreatedAtEnd != nil {
+		q = q.Where("created_at <= ?", *f.CreatedAtEnd)
 	}
 	if f.ShippedAtStart != nil {
 		q = q.Where("shipped_at >= ?", *f.ShippedAtStart)
@@ -124,7 +125,7 @@ func (r *SelfOrderRepo) List(f SelfOrderListFilter) ([]model.SelfOrder, int64, e
 		pageSize = 20
 	}
 	var list []model.SelfOrder
-	err := q.Order("COALESCE(ordered_at, created_at) DESC, id DESC").
+	err := q.Order("created_at DESC, id DESC").
 		Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error
 	return list, total, err
 }
