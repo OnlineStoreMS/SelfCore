@@ -16,6 +16,9 @@ import {
   updateItemCost,
   searchWarehouseSkus,
   SELF_ORDER_STATUS_MAP,
+  SELF_SHIP_STATUS_MAP,
+  deriveSelfDocStatus,
+  deriveSelfShipStatus,
   type SelfOrderDetail,
   type SelfOrderItem,
   type WarehouseSku,
@@ -44,11 +47,23 @@ const bindResults = ref<WarehouseSku[]>([])
 const bindTargetItem = ref<SelfOrderItem | null>(null)
 
 function statusLabel(s: string) {
-  return SELF_ORDER_STATUS_MAP[s]?.label || s
+  const doc = deriveSelfDocStatus(s)
+  return SELF_ORDER_STATUS_MAP[doc]?.label || SELF_ORDER_STATUS_MAP[s]?.label || s
 }
 
 function statusType(s: string) {
-  return SELF_ORDER_STATUS_MAP[s]?.type || 'info'
+  const doc = deriveSelfDocStatus(s)
+  return SELF_ORDER_STATUS_MAP[doc]?.type || SELF_ORDER_STATUS_MAP[s]?.type || 'info'
+}
+
+function shipStatusLabel(s: string) {
+  const ship = deriveSelfShipStatus(s)
+  return ship ? (SELF_SHIP_STATUS_MAP[ship]?.label || ship) : ''
+}
+
+function shipStatusType(s: string) {
+  const ship = deriveSelfShipStatus(s)
+  return ship ? (SELF_SHIP_STATUS_MAP[ship]?.type || 'info') : 'info'
 }
 
 function openOrderCore(id?: number) {
@@ -299,6 +314,10 @@ async function confirmBindSku(sku: WarehouseSku) {
         <div class="header-row">
           <span>{{ order.soNo }}</span>
           <el-tag :type="statusType(order.status)">{{ statusLabel(order.status) }}</el-tag>
+          <el-tag
+            v-if="shipStatusLabel(order.status)"
+            :type="shipStatusType(order.status)"
+          >{{ shipStatusLabel(order.status) }}</el-tag>
         </div>
       </template>
 
@@ -315,8 +334,16 @@ async function confirmBindSku(sku: WarehouseSku) {
 
           <el-descriptions :column="2" border>
             <el-descriptions-item label="自营单号">{{ order.soNo }}</el-descriptions-item>
-            <el-descriptions-item label="状态">
+            <el-descriptions-item label="单据状态">
               <el-tag size="small" :type="statusType(order.status)">{{ statusLabel(order.status) }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="发货状态">
+              <el-tag
+                v-if="shipStatusLabel(order.status)"
+                size="small"
+                :type="shipStatusType(order.status)"
+              >{{ shipStatusLabel(order.status) }}</el-tag>
+              <span v-else class="muted">—</span>
             </el-descriptions-item>
             <el-descriptions-item label="仓库">{{ order.warehouseId || '—' }}</el-descriptions-item>
             <el-descriptions-item label="扣库">

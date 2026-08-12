@@ -127,7 +127,7 @@ const selfWorkCards = computed<WorkCard[]>(() => [
     color: '#0f766e',
     go: () => goSelfOrders(router, {
       today: true,
-      statuses: ['ordered', 'paid'],
+      shipStatus: 'wait_ship',
     }),
   },
 ])

@@ -136,15 +136,52 @@ export const SELF_ORDER_STATUS_MAP: Record<
   ordered: { label: '已下单', type: 'warning' },
   confirmed: { label: '已下单', type: 'warning' }, // 兼容旧数据
   paid: { label: '已付款', type: '' },
-  partial_shipped: { label: '部分发货', type: 'warning' },
-  shipped: { label: '已发货', type: 'success' },
+  partial_shipped: { label: '已付款', type: '' }, // 发货进度见发货状态
+  shipped: { label: '已付款', type: '' },
   completed: { label: '已完成', type: 'success' },
   cancelled: { label: '已取消', type: 'info' },
 }
 
-export const SELF_SHIP_STATUS_MAP: Record<string, string> = {
-  wait_ship: '待发货',
-  shipped: '已发货',
+/** 单据状态筛选项（不含发货进度） */
+export const SELF_ORDER_DOC_STATUS_OPTIONS = [
+  { value: 'draft', label: '草稿' },
+  { value: 'ordered', label: '已下单' },
+  { value: 'paid', label: '已付款' },
+  { value: 'completed', label: '已完成' },
+  { value: 'cancelled', label: '已取消' },
+] as const
+
+/** 发货状态：待发货 / 部分发货 / 已发货 */
+export const SELF_SHIP_STATUS_MAP: Record<
+  string,
+  { label: string; type: '' | 'success' | 'warning' | 'info' | 'danger' }
+> = {
+  wait_ship: { label: '待发货', type: 'warning' },
+  partial_shipped: { label: '部分发货', type: 'warning' },
+  shipped: { label: '已发货', type: 'success' },
+}
+
+export function deriveSelfDocStatus(status?: string): string {
+  const s = (status || '').trim()
+  if (s === 'partial_shipped' || s === 'shipped') return 'paid'
+  if (s === 'confirmed') return 'ordered'
+  return s
+}
+
+export function deriveSelfShipStatus(status?: string): string {
+  switch ((status || '').trim()) {
+    case 'partial_shipped':
+      return 'partial_shipped'
+    case 'shipped':
+    case 'completed':
+      return 'shipped'
+    case 'ordered':
+    case 'paid':
+    case 'confirmed':
+      return 'wait_ship'
+    default:
+      return ''
+  }
 }
 
 export async function listSelfOrders(params: {

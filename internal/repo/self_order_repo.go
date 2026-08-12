@@ -71,7 +71,16 @@ func (r *SelfOrderRepo) applySelfOrderStatusFilters(q *gorm.DB, f SelfOrderListF
 	if len(f.Statuses) > 0 {
 		q = q.Where("status IN ?", f.Statuses)
 	} else if f.Status != "" {
-		q = q.Where("status = ?", f.Status)
+		// 单据「已付款」含发货中（部分发货/已发货仍属已付款阶段）
+		if f.Status == model.SelfOrderStatusPaid {
+			q = q.Where("status IN ?", []string{
+				model.SelfOrderStatusPaid,
+				model.SelfOrderStatusPartialShipped,
+				model.SelfOrderStatusShipped,
+			})
+		} else {
+			q = q.Where("status = ?", f.Status)
+		}
 	}
 	if len(f.ExcludeStatuses) > 0 {
 		q = q.Where("status NOT IN ?", f.ExcludeStatuses)
@@ -81,14 +90,17 @@ func (r *SelfOrderRepo) applySelfOrderStatusFilters(q *gorm.DB, f SelfOrderListF
 	}
 	switch f.ShipStatus {
 	case "wait_ship":
+		// 待发货：已下单/已付款，尚未开始发货
 		q = q.Where("status IN ?", []string{
 			model.SelfOrderStatusOrdered,
 			model.SelfOrderStatusPaid,
 			model.SelfOrderStatusConfirmed, // 兼容未迁移旧数据
 		})
+	case "partial_shipped":
+		q = q.Where("status = ?", model.SelfOrderStatusPartialShipped)
 	case "shipped":
+		// 已发货：全部发出（含已完成归档）
 		q = q.Where("status IN ?", []string{
-			model.SelfOrderStatusPartialShipped,
 			model.SelfOrderStatusShipped,
 			model.SelfOrderStatusCompleted,
 		})

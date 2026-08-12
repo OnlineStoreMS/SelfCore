@@ -8,6 +8,10 @@ import {
   getSelfOrder,
   deleteSelfOrder,
   SELF_ORDER_STATUS_MAP,
+  SELF_ORDER_DOC_STATUS_OPTIONS,
+  SELF_SHIP_STATUS_MAP,
+  deriveSelfDocStatus,
+  deriveSelfShipStatus,
   type SelfOrderListItem,
   type SelfOrderDetail,
 } from '../../api/selfOrder'
@@ -44,11 +48,23 @@ const filters = reactive({
 })
 
 function statusLabel(s: string) {
-  return SELF_ORDER_STATUS_MAP[s]?.label || s
+  const doc = deriveSelfDocStatus(s)
+  return SELF_ORDER_STATUS_MAP[doc]?.label || SELF_ORDER_STATUS_MAP[s]?.label || s
 }
 
 function statusType(s: string) {
-  return SELF_ORDER_STATUS_MAP[s]?.type || 'info'
+  const doc = deriveSelfDocStatus(s)
+  return SELF_ORDER_STATUS_MAP[doc]?.type || SELF_ORDER_STATUS_MAP[s]?.type || 'info'
+}
+
+function shipStatusLabel(s: string) {
+  const ship = deriveSelfShipStatus(s)
+  return ship ? (SELF_SHIP_STATUS_MAP[ship]?.label || ship) : '—'
+}
+
+function shipStatusType(s: string) {
+  const ship = deriveSelfShipStatus(s)
+  return ship ? (SELF_SHIP_STATUS_MAP[ship]?.type || 'info') : 'info'
 }
 
 function formatRefOrder(row: SelfOrderListItem) {
@@ -172,6 +188,7 @@ function applyListIntent() {
   payStatusesFilter.value = ''
   excludeStatusesFilter.value = ''
   filters.status = ''
+  filters.shipStatus = ''
   if (intent.statuses?.length) {
     if (intent.statuses.length === 1) {
       statusFilter.value = intent.statuses[0]
@@ -185,6 +202,9 @@ function applyListIntent() {
   }
   if (intent.payStatuses?.length) {
     payStatusesFilter.value = intent.payStatuses.join(',')
+  }
+  if (intent.shipStatus) {
+    filters.shipStatus = intent.shipStatus
   }
   if (intent.excludeStatuses?.length) {
     excludeStatusesFilter.value = intent.excludeStatuses.join(',')
@@ -297,6 +317,18 @@ const intentTags = computed(() => {
       },
     })
   }
+  if (filters.shipStatus) {
+    const label = SELF_SHIP_STATUS_MAP[filters.shipStatus]?.label || filters.shipStatus
+    tags.push({
+      key: 'ship',
+      label: `发货：${label}`,
+      clear: () => {
+        filters.shipStatus = ''
+        filters.page = 1
+        void load()
+      },
+    })
+  }
   if (excludeStatusesFilter.value) {
     const labels = excludeStatusesFilter.value
       .split(',')
@@ -347,18 +379,18 @@ onUnmounted(() => stopIntentListen())
             style="width: 120px"
             @change="onStatusFilterChange"
           >
-            <el-option label="草稿" value="draft" />
-            <el-option label="已下单" value="ordered" />
-            <el-option label="已付款" value="paid" />
-            <el-option label="部分发货" value="partial_shipped" />
-            <el-option label="已发货" value="shipped" />
-            <el-option label="已完成" value="completed" />
-            <el-option label="已取消" value="cancelled" />
+            <el-option
+              v-for="opt in SELF_ORDER_DOC_STATUS_OPTIONS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="发货状态">
-          <el-select v-model="filters.shipStatus" clearable style="width: 110px" @change="onFilterChange">
+          <el-select v-model="filters.shipStatus" clearable style="width: 120px" @change="onFilterChange">
             <el-option label="待发货" value="wait_ship" />
+            <el-option label="部分发货" value="partial_shipped" />
             <el-option label="已发货" value="shipped" />
           </el-select>
         </el-form-item>
@@ -455,9 +487,19 @@ onUnmounted(() => stopIntentListen())
           <span v-else class="muted">—</span>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="84" align="center">
+      <el-table-column label="单据状态" width="88" align="center">
         <template #default="{ row }">
           <el-tag size="small" :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="发货状态" width="88" align="center">
+        <template #default="{ row }">
+          <el-tag
+            v-if="deriveSelfShipStatus(row.status)"
+            size="small"
+            :type="shipStatusType(row.status)"
+          >{{ shipStatusLabel(row.status) }}</el-tag>
+          <span v-else class="muted">—</span>
         </template>
       </el-table-column>
       <el-table-column label="金额" width="96" align="right">

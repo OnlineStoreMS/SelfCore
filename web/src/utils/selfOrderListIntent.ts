@@ -6,6 +6,8 @@ export type SelfOrderListIntent = {
   statuses?: string[]
   /** 付款状态，如 unpaid,partial */
   payStatuses?: string[]
+  /** 发货状态：wait_ship | partial_shipped | shipped */
+  shipStatus?: string
   excludeStatuses?: string[]
   /** 工作台「今日」 */
   today?: boolean
