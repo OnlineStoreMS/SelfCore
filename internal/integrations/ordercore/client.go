@@ -50,13 +50,19 @@ type OrderAddressBrief struct {
 	FullText string `json:"fullText"`
 }
 
+type OrderShipmentItemBrief struct {
+	OrderItemID uint64 `json:"orderItemId"`
+	Qty         int    `json:"qty"`
+}
+
 type OrderShipmentBrief struct {
-	ID             uint64  `json:"id"`
-	ShipmentNo     string  `json:"shipmentNo"`
-	ExpressCompany string  `json:"expressCompany"`
-	ExpressNo      string  `json:"expressNo"`
-	ShippedAt      *string `json:"shippedAt,omitempty"`
-	Remark         string  `json:"remark"`
+	ID             uint64                   `json:"id"`
+	ShipmentNo     string                   `json:"shipmentNo"`
+	ExpressCompany string                   `json:"expressCompany"`
+	ExpressNo      string                   `json:"expressNo"`
+	ShippedAt      *string                  `json:"shippedAt,omitempty"`
+	Remark         string                   `json:"remark"`
+	Items          []OrderShipmentItemBrief `json:"items,omitempty"`
 }
 
 type OrderBrief struct {
@@ -212,10 +218,16 @@ func (c *Client) GetOrder(ctx context.Context, bearerToken string, id uint64) (*
 }
 
 type ShipRequest struct {
-	ExpressCompany string `json:"expressCompany"`
-	ExpressNo      string `json:"expressNo"`
-	Remark         string `json:"remark"`
-	Callback       bool   `json:"callback"`
+	ExpressCompany string          `json:"expressCompany"`
+	ExpressNo      string          `json:"expressNo"`
+	Remark         string          `json:"remark"`
+	Callback       bool            `json:"callback"`
+	Items          []ShipItemInput `json:"items,omitempty"`
+}
+
+type ShipItemInput struct {
+	OrderItemID uint64 `json:"orderItemId"`
+	Qty         int    `json:"qty"`
 }
 
 type UpdatePaymentRequest struct {

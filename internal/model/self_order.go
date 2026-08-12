@@ -77,11 +77,12 @@ type SelfOrderItem struct {
 	InvSkuCode    string    `gorm:"size:64" json:"invSkuCode"`
 	CostUnitPrice float64   `gorm:"type:decimal(12,2);not null;default:0" json:"costUnitPrice"`
 	CostAmount    float64   `gorm:"type:decimal(14,2);not null;default:0" json:"costAmount"`
-	RefSoID       uint64    `gorm:"index;default:0" json:"refSoId"`
-	RefOrderNo    string    `gorm:"size:64;index" json:"refOrderNo"`
-	Remark        string    `gorm:"type:text" json:"remark"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	RefSoID        uint64    `gorm:"index;default:0" json:"refSoId"`
+	RefOrderItemID uint64    `gorm:"index;default:0" json:"refOrderItemId"`
+	RefOrderNo     string    `gorm:"size:64;index" json:"refOrderNo"`
+	Remark         string    `gorm:"type:text" json:"remark"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 func (SelfOrderItem) TableName() string { return "self_order_items" }

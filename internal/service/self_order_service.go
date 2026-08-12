@@ -124,7 +124,7 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 			Qty: qty, SaleUnitPrice: it.SaleUnitPrice, SaleAmount: it.SaleAmount,
 			InvSkuID: it.InvSkuID, InvSkuCode: strings.TrimSpace(it.InvSkuCode),
 			CostUnitPrice: it.CostUnitPrice, CostAmount: it.CostAmount,
-			RefSoID: it.RefSoID, RefOrderNo: strings.TrimSpace(it.RefOrderNo),
+			RefSoID: it.RefSoID, RefOrderItemID: it.RefOrderItemID, RefOrderNo: strings.TrimSpace(it.RefOrderNo),
 			Remark: it.Remark,
 		}
 		if line.RefSoID == 0 {
@@ -597,6 +597,7 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 			carrier    string
 			shippedAt  *time.Time
 			remark     string
+			orderItems []ordercore.OrderShipmentItemBrief
 		}
 		logs := make([]logistics, 0)
 		seenTrack := map[string]struct{}{}
@@ -620,9 +621,10 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 				carrier:    strings.TrimSpace(osh.ExpressCompany),
 				shippedAt:  shippedAt,
 				remark:     fmt.Sprintf("同步自订单 %s", order.OrderNo),
+				orderItems: osh.Items,
 			})
 		}
-		if len(logs) == 0 && order.ShipStatus == "shipped" {
+		if len(logs) == 0 && (order.ShipStatus == "shipped" || order.ShipStatus == "partial_shipped") {
 			logs = append(logs, logistics{
 				trackingNo: fmt.Sprintf("SYNC-%s", order.OrderNo),
 				carrier:    "订单中心已发货",
@@ -634,128 +636,173 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 			continue
 		}
 
-		primary := logs[0]
-		existing, ferr := r.FindShipmentByTrackingNo(selfOrderID, primary.trackingNo)
-		if ferr != nil && !errors.Is(ferr, gorm.ErrRecordNotFound) {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, ferr))
-			continue
+		byOrderItemID := map[uint64]model.SelfOrderItem{}
+		for _, it := range g.items {
+			if it.RefOrderItemID > 0 {
+				byOrderItemID[it.RefOrderItemID] = it
+			}
 		}
-		if existing != nil {
-			changed := false
-			if strings.TrimSpace(existing.ReceiverName) == "" && receiverName != "" {
-				existing.ReceiverName = receiverName
-				changed = true
+		shippedQty, _ := r.SumShippedQtyByItem(selfOrderID)
+
+		for li, entry := range logs {
+			existing, ferr := r.FindShipmentByTrackingNo(selfOrderID, entry.trackingNo)
+			if ferr != nil && !errors.Is(ferr, gorm.ErrRecordNotFound) {
+				out.Skipped++
+				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, ferr))
+				continue
 			}
-			if strings.TrimSpace(existing.ReceiverPhone) == "" && receiverPhone != "" {
-				existing.ReceiverPhone = receiverPhone
-				changed = true
-			}
-			if strings.TrimSpace(existing.ReceiverAddress) == "" && receiverAddr != "" {
-				existing.ReceiverAddress = receiverAddr
-				changed = true
-			}
-			if strings.TrimSpace(existing.CarrierName) == "" && primary.carrier != "" {
-				existing.CarrierName = primary.carrier
-				changed = true
-			}
-			if existing.Status == model.ShipmentStatusPending {
-				existing.Status = model.ShipmentStatusShipped
-				now := time.Now()
-				if primary.shippedAt != nil {
-					existing.ShippedAt = primary.shippedAt
-				} else {
-					existing.ShippedAt = &now
+			if existing != nil {
+				changed := false
+				if strings.TrimSpace(existing.ReceiverName) == "" && receiverName != "" {
+					existing.ReceiverName = receiverName
+					changed = true
 				}
-				changed = true
-			}
-			if changed {
-				if err := r.SaveShipment(existing); err != nil {
-					out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
+				if strings.TrimSpace(existing.ReceiverPhone) == "" && receiverPhone != "" {
+					existing.ReceiverPhone = receiverPhone
+					changed = true
+				}
+				if strings.TrimSpace(existing.ReceiverAddress) == "" && receiverAddr != "" {
+					existing.ReceiverAddress = receiverAddr
+					changed = true
+				}
+				if strings.TrimSpace(existing.CarrierName) == "" && entry.carrier != "" {
+					existing.CarrierName = entry.carrier
+					changed = true
+				}
+				if !existing.CallbackOK {
+					// 来自订单中心的运单视为已回传，避免再点「重试回传」
+					existing.CallbackOK = true
+					changed = true
+				}
+				if existing.Status == model.ShipmentStatusPending {
+					existing.Status = model.ShipmentStatusShipped
+					now := time.Now()
+					if entry.shippedAt != nil {
+						existing.ShippedAt = entry.shippedAt
+					} else {
+						existing.ShippedAt = &now
+					}
+					changed = true
+				}
+				if changed {
+					if err := r.SaveShipment(existing); err != nil {
+						out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
+						out.Skipped++
+						continue
+					}
+					out.Updated++
+				} else {
 					out.Skipped++
+				}
+				continue
+			}
+
+			remainInputs := make([]dto.SelfShipmentItemInput, 0)
+			if len(entry.orderItems) > 0 && len(byOrderItemID) > 0 {
+				for _, oi := range entry.orderItems {
+					soItem, ok := byOrderItemID[oi.OrderItemID]
+					if !ok || oi.Qty <= 0 {
+						continue
+					}
+					left := soItem.Qty - shippedQty[soItem.ID]
+					if left <= 0 {
+						continue
+					}
+					qty := oi.Qty
+					if qty > left {
+						qty = left
+					}
+					remainInputs = append(remainInputs, dto.SelfShipmentItemInput{
+						SelfOrderItemID: soItem.ID, Qty: qty,
+					})
+					shippedQty[soItem.ID] += qty
+				}
+			}
+			// 无销售行明细映射时：仅首运单挂剩余可发数量（兼容历史）
+			if len(remainInputs) == 0 && li == 0 {
+				for _, it := range g.items {
+					if it.ID == 0 {
+						continue
+					}
+					remain := it.Qty - shippedQty[it.ID]
+					if remain <= 0 {
+						continue
+					}
+					remainInputs = append(remainInputs, dto.SelfShipmentItemInput{
+						SelfOrderItemID: it.ID, Qty: remain,
+					})
+					shippedQty[it.ID] += remain
+				}
+			}
+			if len(remainInputs) == 0 && li > 0 {
+				// 附加运单无商品明细也落一条记录，便于对账
+				no, nerr := r.NextShipmentNo()
+				if nerr != nil {
+					out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, nerr))
 					continue
 				}
-				out.Updated++
-			} else {
+				now := time.Now()
+				shippedAt := &now
+				if entry.shippedAt != nil {
+					shippedAt = entry.shippedAt
+				}
+				esh := &model.SelfShipment{
+					SelfOrderID:     selfOrderID,
+					ShipmentNo:      no,
+					Status:          model.ShipmentStatusShipped,
+					CarrierName:     entry.carrier,
+					TrackingNo:      entry.trackingNo,
+					ShippedAt:       shippedAt,
+					ReceiverName:    receiverName,
+					ReceiverPhone:   receiverPhone,
+					ReceiverAddress: receiverAddr,
+					CallbackOK:      true,
+					Remark:          entry.remark + "（附加运单）",
+				}
+				if err := r.CreateShipment(esh, nil); err != nil {
+					out.Errors = append(out.Errors, fmt.Sprintf("%s extra: %v", order.OrderNo, err))
+					continue
+				}
+				out.Created++
+				continue
+			}
+			if len(remainInputs) == 0 {
 				out.Skipped++
-			}
-			continue
-		}
-
-		shippedQty, _ := r.SumShippedQtyByItem(selfOrderID)
-		remainInputs := make([]dto.SelfShipmentItemInput, 0, len(g.items))
-		for _, it := range g.items {
-			if it.ID == 0 {
 				continue
 			}
-			remain := it.Qty - shippedQty[it.ID]
-			if remain <= 0 {
+			items, berr := s.buildShipmentItems(o, remainInputs)
+			if berr != nil {
+				out.Skipped++
+				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, berr))
 				continue
 			}
-			remainInputs = append(remainInputs, dto.SelfShipmentItemInput{
-				SelfOrderItemID: it.ID, Qty: remain,
-			})
-		}
-		if len(remainInputs) == 0 {
-			out.Skipped++
-			continue
-		}
-		items, berr := s.buildShipmentItems(o, remainInputs)
-		if berr != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, berr))
-			continue
-		}
-		no, nerr := r.NextShipmentNo()
-		if nerr != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, nerr))
-			continue
-		}
-		now := time.Now()
-		shippedAt := &now
-		if primary.shippedAt != nil {
-			shippedAt = primary.shippedAt
-		}
-		sh := &model.SelfShipment{
-			SelfOrderID:     selfOrderID,
-			ShipmentNo:      no,
-			Status:          model.ShipmentStatusShipped,
-			CarrierName:     primary.carrier,
-			TrackingNo:      primary.trackingNo,
-			ShippedAt:       shippedAt,
-			ReceiverName:    receiverName,
-			ReceiverPhone:   receiverPhone,
-			ReceiverAddress: receiverAddr,
-			Remark:          primary.remark,
-		}
-		if err := r.CreateShipment(sh, items); err != nil {
-			out.Skipped++
-			out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
-			continue
-		}
-		out.Created++
-
-		for i := 1; i < len(logs); i++ {
-			extra := logs[i]
-			if ex, _ := r.FindShipmentByTrackingNo(selfOrderID, extra.trackingNo); ex != nil {
+			no, nerr := r.NextShipmentNo()
+			if nerr != nil {
+				out.Skipped++
+				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, nerr))
 				continue
 			}
-			eno, _ := r.NextShipmentNo()
-			esh := &model.SelfShipment{
+			now := time.Now()
+			shippedAt := &now
+			if entry.shippedAt != nil {
+				shippedAt = entry.shippedAt
+			}
+			sh := &model.SelfShipment{
 				SelfOrderID:     selfOrderID,
-				ShipmentNo:      eno,
+				ShipmentNo:      no,
 				Status:          model.ShipmentStatusShipped,
-				CarrierName:     extra.carrier,
-				TrackingNo:      extra.trackingNo,
+				CarrierName:     entry.carrier,
+				TrackingNo:      entry.trackingNo,
 				ShippedAt:       shippedAt,
 				ReceiverName:    receiverName,
 				ReceiverPhone:   receiverPhone,
 				ReceiverAddress: receiverAddr,
-				Remark:          extra.remark + "（附加运单）",
+				CallbackOK:      true, // 源已是订单中心发货，无需再回传
+				Remark:          entry.remark,
 			}
-			if err := r.CreateShipment(esh, nil); err != nil {
-				out.Errors = append(out.Errors, fmt.Sprintf("%s extra: %v", order.OrderNo, err))
+			if err := r.CreateShipment(sh, items); err != nil {
+				out.Skipped++
+				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
 				continue
 			}
 			out.Created++
@@ -764,6 +811,46 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 
 	if err := s.syncSelfOrderShipStatus(selfOrderID); err != nil {
 		out.Errors = append(out.Errors, err.Error())
+	}
+	return out, nil
+}
+
+// SyncShipmentsByRefSoID 按销售单自动同步物流到关联自营单（发货中心/订单中心发货后调用）。
+func (s *SelfOrderService) SyncShipmentsByRefSoID(ctx context.Context, bearerToken string, refSoID uint64) (*dto.SyncShipmentsFromOrdersResult, error) {
+	if refSoID == 0 {
+		return nil, fmt.Errorf("refSoId 无效")
+	}
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	list, _, err := r.List(repo.SelfOrderListFilter{
+		RefSoID:  refSoID,
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &dto.SyncShipmentsFromOrdersResult{}
+	if len(list) == 0 {
+		out.Skipped = 1
+		return out, nil
+	}
+	for _, o := range list {
+		if o.Status == model.SelfOrderStatusCancelled {
+			out.Skipped++
+			continue
+		}
+		part, serr := s.SyncShipmentsFromOrders(ctx, o.ID, bearerToken, &dto.SyncShipmentsFromOrdersInput{RefSoID: refSoID})
+		if serr != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("自营单#%d: %v", o.ID, serr))
+			out.Skipped++
+			continue
+		}
+		if part != nil {
+			out.Created += part.Created
+			out.Updated += part.Updated
+			out.Skipped += part.Skipped
+			out.Errors = append(out.Errors, part.Errors...)
+		}
 	}
 	return out, nil
 }
@@ -1150,11 +1237,33 @@ func (s *SelfOrderService) callbackOrderCore(ctx context.Context, bearerToken st
 	if s.oc == nil {
 		return fmt.Errorf("OrderCore 未配置")
 	}
+	items := make([]ordercore.ShipItemInput, 0, len(sh.Items))
+	itemByID := map[uint64]model.SelfOrderItem{}
+	for _, it := range o.Items {
+		itemByID[it.ID] = it
+	}
+	if len(sh.Items) == 0 {
+		fresh, err := s.repos.SelfOrder.ForTenant(s.tenantID).GetShipment(sh.ID)
+		if err == nil && fresh != nil {
+			sh.Items = fresh.Items
+		}
+	}
+	for _, sit := range sh.Items {
+		soItem, ok := itemByID[sit.SelfOrderItemID]
+		if !ok || soItem.RefOrderItemID == 0 || sit.Qty <= 0 {
+			continue
+		}
+		items = append(items, ordercore.ShipItemInput{
+			OrderItemID: soItem.RefOrderItemID,
+			Qty:         sit.Qty,
+		})
+	}
 	_, err := s.oc.ShipOrder(ctx, bearerToken, o.RefSoID, ordercore.ShipRequest{
 		ExpressCompany: sh.CarrierName,
 		ExpressNo:      sh.TrackingNo,
 		Remark:         sh.Remark,
 		Callback:       true,
+		Items:          items,
 	})
 	if err != nil {
 		return fmt.Errorf("订单中心回传失败: %w", err)
@@ -1664,7 +1773,7 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 			Qty: it.Qty, SaleUnitPrice: it.SaleUnitPrice, SaleAmount: it.SaleAmount,
 			InvSkuID: it.InvSkuID, InvSkuCode: it.InvSkuCode,
 			CostUnitPrice: it.CostUnitPrice, CostAmount: it.CostAmount,
-			RefSoID: it.RefSoID, RefOrderNo: it.RefOrderNo, Remark: it.Remark,
+			RefSoID: it.RefSoID, RefOrderItemID: it.RefOrderItemID, RefOrderNo: it.RefOrderNo, Remark: it.Remark,
 		})
 	}
 	if d.Items == nil {

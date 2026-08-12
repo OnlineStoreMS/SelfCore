@@ -2,21 +2,22 @@ package dto
 
 // SelfOrderItemInput 创建/更新自营单明细。
 type SelfOrderItemInput struct {
-	PimSkuID      uint64  `json:"pimSkuId"`
-	SkuCode       string  `json:"skuCode"`
-	ProductName   string  `json:"productName"`
-	SkuSpecs      string  `json:"skuSpecs"`
-	PicURL        string  `json:"picUrl"`
-	Qty           int     `json:"qty"`
-	SaleUnitPrice float64 `json:"saleUnitPrice"`
-	SaleAmount    float64 `json:"saleAmount"`
-	InvSkuID      uint64  `json:"invSkuId"`
-	InvSkuCode    string  `json:"invSkuCode"`
-	CostUnitPrice float64 `json:"costUnitPrice"`
-	CostAmount    float64 `json:"costAmount"`
-	RefSoID       uint64  `json:"refSoId"`
-	RefOrderNo    string  `json:"refOrderNo"`
-	Remark        string  `json:"remark"`
+	PimSkuID       uint64  `json:"pimSkuId"`
+	SkuCode        string  `json:"skuCode"`
+	ProductName    string  `json:"productName"`
+	SkuSpecs       string  `json:"skuSpecs"`
+	PicURL         string  `json:"picUrl"`
+	Qty            int     `json:"qty"`
+	SaleUnitPrice  float64 `json:"saleUnitPrice"`
+	SaleAmount     float64 `json:"saleAmount"`
+	InvSkuID       uint64  `json:"invSkuId"`
+	InvSkuCode     string  `json:"invSkuCode"`
+	CostUnitPrice  float64 `json:"costUnitPrice"`
+	CostAmount     float64 `json:"costAmount"`
+	RefSoID        uint64  `json:"refSoId"`
+	RefOrderItemID uint64  `json:"refOrderItemId"`
+	RefOrderNo     string  `json:"refOrderNo"`
+	Remark         string  `json:"remark"`
 }
 
 // SelfOrderInput OrderCore / 管理端创建自营单。
@@ -76,22 +77,23 @@ type SelfOrderListItem struct {
 }
 
 type SelfOrderItemDTO struct {
-	ID            uint64  `json:"id"`
-	PimSkuID      uint64  `json:"pimSkuId"`
-	SkuCode       string  `json:"skuCode"`
-	ProductName   string  `json:"productName"`
-	SkuSpecs      string  `json:"skuSpecs"`
-	PicURL        string  `json:"picUrl"`
-	Qty           int     `json:"qty"`
-	SaleUnitPrice float64 `json:"saleUnitPrice"`
-	SaleAmount    float64 `json:"saleAmount"`
-	InvSkuID      uint64  `json:"invSkuId"`
-	InvSkuCode    string  `json:"invSkuCode"`
-	CostUnitPrice float64 `json:"costUnitPrice"`
-	CostAmount    float64 `json:"costAmount"`
-	RefSoID       uint64  `json:"refSoId"`
-	RefOrderNo    string  `json:"refOrderNo"`
-	Remark        string  `json:"remark"`
+	ID             uint64  `json:"id"`
+	PimSkuID       uint64  `json:"pimSkuId"`
+	SkuCode        string  `json:"skuCode"`
+	ProductName    string  `json:"productName"`
+	SkuSpecs       string  `json:"skuSpecs"`
+	PicURL         string  `json:"picUrl"`
+	Qty            int     `json:"qty"`
+	SaleUnitPrice  float64 `json:"saleUnitPrice"`
+	SaleAmount     float64 `json:"saleAmount"`
+	InvSkuID       uint64  `json:"invSkuId"`
+	InvSkuCode     string  `json:"invSkuCode"`
+	CostUnitPrice  float64 `json:"costUnitPrice"`
+	CostAmount     float64 `json:"costAmount"`
+	RefSoID        uint64  `json:"refSoId"`
+	RefOrderItemID uint64  `json:"refOrderItemId"`
+	RefOrderNo     string  `json:"refOrderNo"`
+	Remark         string  `json:"remark"`
 }
 
 type SelfOrderDetail struct {

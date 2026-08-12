@@ -259,6 +259,20 @@ func (h *SelfOrderHandler) SyncShipmentsFromOrders(c *gin.Context) {
 	response.OK(c, result)
 }
 
+func (h *SelfOrderHandler) SyncShipmentsByRefSo(c *gin.Context) {
+	var in dto.SyncShipmentsFromOrdersInput
+	if err := c.ShouldBindJSON(&in); err != nil || in.RefSoID == 0 {
+		response.Fail(c, http.StatusBadRequest, "请提供 refSoId")
+		return
+	}
+	result, err := h.ps(c).SyncShipmentsByRefSoID(c.Request.Context(), authcontext.BearerToken(c), in.RefSoID)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, result)
+}
+
 func (h *SelfOrderHandler) ListAttachments(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {
