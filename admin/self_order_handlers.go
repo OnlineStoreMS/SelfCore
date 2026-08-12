@@ -465,6 +465,20 @@ func (h *SelfOrderHandler) CancelByRefSo(c *gin.Context) {
 	response.OK(c, list)
 }
 
+func (h *SelfOrderHandler) DeleteByRefSo(c *gin.Context) {
+	var in dto.SelfDeleteByRefInput
+	if err := c.ShouldBindJSON(&in); err != nil || in.RefSoID == 0 {
+		response.Fail(c, http.StatusBadRequest, "请提供 refSoId")
+		return
+	}
+	n, err := h.ps(c).DeleteByRefSoID(in.RefSoID)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, gin.H{"deleted": n})
+}
+
 func (h *SelfOrderHandler) ListPayments(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {

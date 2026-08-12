@@ -1389,6 +1389,30 @@ func (s *SelfOrderService) CancelByRefSoID(refSoID uint64, reason string) ([]dto
 	return out, nil
 }
 
+// DeleteByRefSoID 按销售单硬删除关联自营单（手工单删除级联）。
+func (s *SelfOrderService) DeleteByRefSoID(refSoID uint64) (int, error) {
+	if refSoID == 0 {
+		return 0, fmt.Errorf("refSoId 无效")
+	}
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	list, _, err := r.List(repo.SelfOrderListFilter{
+		RefSoID:  refSoID,
+		Page:     1,
+		PageSize: 100,
+	})
+	if err != nil {
+		return 0, err
+	}
+	deleted := 0
+	for _, o := range list {
+		if err := r.Delete(o.ID); err != nil {
+			return deleted, err
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
 func (s *SelfOrderService) deductStockForShipment(ctx context.Context, bearerToken string, o *model.SelfOrder, sh *model.SelfShipment) error {
 	if sh.StockDeducted {
 		return nil

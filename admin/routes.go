@@ -15,6 +15,7 @@ func RegisterRoutes(g *gin.RouterGroup, distributorH *DistributorHandler, priceH
 	g.GET("/self-orders/status-counts", selfOrderH.StatusCounts)
 	g.POST("/self-orders", selfOrderH.Create)
 	g.POST("/self-orders/cancel-by-ref-so", selfOrderH.CancelByRefSo)
+	g.POST("/self-orders/delete-by-ref-so", selfOrderH.DeleteByRefSo)
 	g.GET("/self-orders/:id", selfOrderH.Get)
 	g.DELETE("/self-orders/:id", selfOrderH.Delete)
 	g.POST("/self-orders/:id/submit", selfOrderH.Submit)

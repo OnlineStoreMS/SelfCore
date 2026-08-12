@@ -149,6 +149,10 @@ type SelfCancelByRefInput struct {
 	Reason  string `json:"reason"`
 }
 
+type SelfDeleteByRefInput struct {
+	RefSoID uint64 `json:"refSoId" binding:"required"`
+}
+
 type SelfCancelInput struct {
 	Reason string `json:"reason"`
 }
