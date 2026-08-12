@@ -62,7 +62,7 @@ export const SELF_ATTACHMENT_TYPE_MAP: Record<string, string> = {
 }
 
 export const SELF_PAY_STATUS_MAP: Record<string, string> = {
-  unpaid: '未付清',
+  unpaid: '未付款',
   partial: '部分付款',
   paid: '已付清',
 }

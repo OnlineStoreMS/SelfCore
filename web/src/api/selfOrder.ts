@@ -128,25 +128,24 @@ export interface Warehouse {
   isDefault: number
 }
 
+/** 单据状态展示：已下单 / 已完成 / 已取消（内部 paid/发货中等均归为已下单） */
 export const SELF_ORDER_STATUS_MAP: Record<
   string,
   { label: string; type: '' | 'success' | 'warning' | 'info' | 'danger' }
 > = {
-  draft: { label: '草稿', type: 'info' },
+  draft: { label: '已下单', type: 'warning' },
   ordered: { label: '已下单', type: 'warning' },
-  confirmed: { label: '已下单', type: 'warning' }, // 兼容旧数据
-  paid: { label: '已付款', type: '' },
-  partial_shipped: { label: '已付款', type: '' }, // 发货进度见发货状态
-  shipped: { label: '已付款', type: '' },
+  confirmed: { label: '已下单', type: 'warning' },
+  paid: { label: '已下单', type: 'warning' },
+  partial_shipped: { label: '已下单', type: 'warning' },
+  shipped: { label: '已下单', type: 'warning' },
   completed: { label: '已完成', type: 'success' },
   cancelled: { label: '已取消', type: 'info' },
 }
 
-/** 单据状态筛选项（不含发货进度） */
+/** 单据状态筛选项 */
 export const SELF_ORDER_DOC_STATUS_OPTIONS = [
-  { value: 'draft', label: '草稿' },
   { value: 'ordered', label: '已下单' },
-  { value: 'paid', label: '已付款' },
   { value: 'completed', label: '已完成' },
   { value: 'cancelled', label: '已取消' },
 ] as const
@@ -161,11 +160,19 @@ export const SELF_SHIP_STATUS_MAP: Record<
   shipped: { label: '已发货', type: 'success' },
 }
 
+/** 付款状态筛选项 */
+export const SELF_PAY_STATUS_OPTIONS = [
+  { value: 'unpaid', label: '未付款' },
+  { value: 'partial', label: '部分付款' },
+  { value: 'paid', label: '已付清' },
+] as const
+
 export function deriveSelfDocStatus(status?: string): string {
   const s = (status || '').trim()
-  if (s === 'partial_shipped' || s === 'shipped') return 'paid'
-  if (s === 'confirmed') return 'ordered'
-  return s
+  if (s === 'completed') return 'completed'
+  if (s === 'cancelled') return 'cancelled'
+  if (!s) return ''
+  return 'ordered'
 }
 
 export function deriveSelfShipStatus(status?: string): string {
@@ -175,6 +182,7 @@ export function deriveSelfShipStatus(status?: string): string {
     case 'shipped':
     case 'completed':
       return 'shipped'
+    case 'draft':
     case 'ordered':
     case 'paid':
     case 'confirmed':
@@ -194,7 +202,6 @@ export async function listSelfOrders(params: {
   keyword?: string
   createdAtStart?: string
   createdAtEnd?: string
-  /** @deprecated 兼容旧参数，后端按创建时间处理 */
   orderedAtStart?: string
   orderedAtEnd?: string
   shippedAtStart?: string

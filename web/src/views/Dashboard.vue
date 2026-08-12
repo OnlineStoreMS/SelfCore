@@ -122,7 +122,7 @@ const selfWorkCards = computed<WorkCard[]>(() => [
   {
     key: 'self-wait-ship',
     label: '自营待发货',
-    tip: '今日已下单 / 已付款',
+    tip: '今日已下单待发货',
     value: wb.value.selfWaitShipPO,
     color: '#0f766e',
     go: () => goSelfOrders(router, {

@@ -37,8 +37,10 @@ func (h *SelfOrderHandler) listFilterFromQuery(c *gin.Context) repo.SelfOrderLis
 		PayStatuses:     splitCSV(c.Query("payStatus")),
 		RefSoID: refSoID, Keyword: c.Query("keyword"),
 		ShipStatus:     c.Query("shipStatus"),
-		CreatedAtStart: parsePOCreatedAtStart(firstNonEmptyQuery(c, "createdAtStart", "orderedAtStart")),
-		CreatedAtEnd:   parseDateTimeInclusiveEnd(firstNonEmptyQuery(c, "createdAtEnd", "orderedAtEnd")),
+		CreatedAtStart: parsePOCreatedAtStart(c.Query("createdAtStart")),
+		CreatedAtEnd:   parseDateTimeInclusiveEnd(c.Query("createdAtEnd")),
+		OrderedAtStart: parsePOCreatedAtStart(c.Query("orderedAtStart")),
+		OrderedAtEnd:   parseDateTimeInclusiveEnd(c.Query("orderedAtEnd")),
 		ShippedAtStart: parsePOCreatedAtStart(c.Query("shippedAtStart")),
 		ShippedAtEnd:   parseDateTimeInclusiveEnd(c.Query("shippedAtEnd")),
 	}

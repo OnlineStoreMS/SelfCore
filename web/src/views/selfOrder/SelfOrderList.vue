@@ -10,6 +10,7 @@ import {
   SELF_ORDER_STATUS_MAP,
   SELF_ORDER_DOC_STATUS_OPTIONS,
   SELF_SHIP_STATUS_MAP,
+  SELF_PAY_STATUS_OPTIONS,
   deriveSelfDocStatus,
   deriveSelfShipStatus,
   type SelfOrderListItem,
@@ -43,7 +44,9 @@ const filters = reactive({
   keyword: '',
   shipStatus: '',
   status: '',
+  payStatus: '',
   createdRange: last7DaysDateTimeRange() as [string, string] | null,
+  orderedRange: null as [string, string] | null,
   shippedRange: null as [string, string] | null,
 })
 
@@ -189,6 +192,8 @@ function applyListIntent() {
   excludeStatusesFilter.value = ''
   filters.status = ''
   filters.shipStatus = ''
+  filters.payStatus = ''
+  filters.orderedRange = null
   if (intent.statuses?.length) {
     if (intent.statuses.length === 1) {
       statusFilter.value = intent.statuses[0]
@@ -202,6 +207,7 @@ function applyListIntent() {
   }
   if (intent.payStatuses?.length) {
     payStatusesFilter.value = intent.payStatuses.join(',')
+    filters.payStatus = intent.payStatuses.length === 1 ? intent.payStatuses[0] : ''
   }
   if (intent.shipStatus) {
     filters.shipStatus = intent.shipStatus
@@ -230,12 +236,16 @@ async function load() {
       shipStatus: filters.shipStatus || undefined,
       status: statusesFilter.value ? undefined : (statusFilter.value || filters.status || undefined),
       statuses: statusesFilter.value || undefined,
-      payStatus: payStatusesFilter.value || undefined,
+      payStatus: payStatusesFilter.value || filters.payStatus || undefined,
       excludeStatuses: excludeStatusesFilter.value || undefined,
     }
     if (filters.createdRange?.length === 2) {
       params.createdAtStart = filters.createdRange[0]
       params.createdAtEnd = filters.createdRange[1]
+    }
+    if (filters.orderedRange?.length === 2) {
+      params.orderedAtStart = filters.orderedRange[0]
+      params.orderedAtEnd = filters.orderedRange[1]
     }
     if (filters.shippedRange?.length === 2) {
       params.shippedAtStart = filters.shippedRange[0]
@@ -262,15 +272,22 @@ function onStatusFilterChange() {
   onFilterChange()
 }
 
+function onPayFilterChange() {
+  payStatusesFilter.value = filters.payStatus || ''
+  onFilterChange()
+}
+
 function resetFilters() {
   filters.keyword = ''
   filters.shipStatus = ''
   filters.status = ''
+  filters.payStatus = ''
   statusFilter.value = ''
   statusesFilter.value = ''
   payStatusesFilter.value = ''
   excludeStatusesFilter.value = ''
   filters.createdRange = last7DaysDateTimeRange()
+  filters.orderedRange = null
   filters.shippedRange = null
   onFilterChange()
 }
@@ -311,6 +328,18 @@ const intentTags = computed(() => {
       key: 'pay',
       label: `付款：${labels.join(' / ')}`,
       clear: () => {
+        payStatusesFilter.value = ''
+        filters.payStatus = ''
+        filters.page = 1
+        void load()
+      },
+    })
+  } else if (filters.payStatus) {
+    tags.push({
+      key: 'pay',
+      label: `付款：${SELF_PAY_STATUS_MAP[filters.payStatus] || filters.payStatus}`,
+      clear: () => {
+        filters.payStatus = ''
         payStatusesFilter.value = ''
         filters.page = 1
         void load()
@@ -394,9 +423,39 @@ onUnmounted(() => stopIntentListen())
             <el-option label="已发货" value="shipped" />
           </el-select>
         </el-form-item>
+        <el-form-item label="付款状态">
+          <el-select
+            v-model="filters.payStatus"
+            clearable
+            style="width: 120px"
+            @change="onPayFilterChange"
+          >
+            <el-option
+              v-for="opt in SELF_PAY_STATUS_OPTIONS"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="创建时间">
           <el-date-picker
             v-model="filters.createdRange"
+            type="datetimerange"
+            range-separator="至"
+            start-placeholder="开始"
+            end-placeholder="结束"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            :shortcuts="dateShortcuts"
+            :default-time="dateRangeDefaultTime"
+            clearable
+            style="width: 360px"
+            @change="onFilterChange"
+          />
+        </el-form-item>
+        <el-form-item label="下单时间">
+          <el-date-picker
+            v-model="filters.orderedRange"
             type="datetimerange"
             range-separator="至"
             start-placeholder="开始"
@@ -509,7 +568,7 @@ onUnmounted(() => stopIntentListen())
       </el-table-column>
       <el-table-column label="付款" width="84" align="center">
         <template #default="{ row }">
-          {{ SELF_PAY_STATUS_MAP[row.payStatus || 'unpaid'] || row.payStatus || '未付清' }}
+          {{ SELF_PAY_STATUS_MAP[row.payStatus || 'unpaid'] || row.payStatus || '未付款' }}
         </template>
       </el-table-column>
       <el-table-column prop="itemCount" label="行数" width="56" align="center" />

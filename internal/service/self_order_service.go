@@ -213,6 +213,10 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 			now := time.Now()
 			o.OrderedAt = &now
 		}
+		if t := parseDateTime(in.CreatedAt); t != nil {
+			o.CreatedAt = *t
+			o.UpdatedAt = *t
+		}
 		if o.PaidAt == nil && payStatus == model.DistPayStatusPaid {
 			if o.OrderedAt != nil {
 				o.PaidAt = o.OrderedAt

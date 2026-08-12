@@ -32,9 +32,12 @@ type SelfOrderListFilter struct {
 	RefSoID        uint64
 	Keyword        string
 	ShipStatus     string // wait_ship | partial_shipped | shipped
-	// CreatedAt* 按创建自营单时间筛选（非销售单下单时间）
+	// CreatedAt* 按创建自营单时间（≈分配时间）筛选
 	CreatedAtStart *time.Time
 	CreatedAtEnd   *time.Time
+	// OrderedAt* 按销售单下单时间筛选
+	OrderedAtStart *time.Time
+	OrderedAtEnd   *time.Time
 	ShippedAtStart *time.Time
 	ShippedAtEnd   *time.Time
 	Page           int
@@ -59,6 +62,12 @@ func (r *SelfOrderRepo) applySelfOrderContextFilters(q *gorm.DB, f SelfOrderList
 	if f.CreatedAtEnd != nil {
 		q = q.Where("created_at <= ?", *f.CreatedAtEnd)
 	}
+	if f.OrderedAtStart != nil {
+		q = q.Where("ordered_at >= ?", *f.OrderedAtStart)
+	}
+	if f.OrderedAtEnd != nil {
+		q = q.Where("ordered_at <= ?", *f.OrderedAtEnd)
+	}
 	if f.ShippedAtStart != nil {
 		q = q.Where("shipped_at >= ?", *f.ShippedAtStart)
 	}
@@ -72,12 +81,11 @@ func (r *SelfOrderRepo) applySelfOrderStatusFilters(q *gorm.DB, f SelfOrderListF
 	if len(f.Statuses) > 0 {
 		q = q.Where("status IN ?", f.Statuses)
 	} else if f.Status != "" {
-		// 单据「已付款」含发货中（部分发货/已发货仍属已付款阶段）
-		if f.Status == model.SelfOrderStatusPaid {
-			q = q.Where("status IN ?", []string{
-				model.SelfOrderStatusPaid,
-				model.SelfOrderStatusPartialShipped,
-				model.SelfOrderStatusShipped,
+		// 单据「已下单」= 未完成且未取消（含草稿/付款中/发货中）
+		if f.Status == model.SelfOrderStatusOrdered {
+			q = q.Where("status NOT IN ?", []string{
+				model.SelfOrderStatusCompleted,
+				model.SelfOrderStatusCancelled,
 			})
 		} else {
 			q = q.Where("status = ?", f.Status)
@@ -91,11 +99,12 @@ func (r *SelfOrderRepo) applySelfOrderStatusFilters(q *gorm.DB, f SelfOrderListF
 	}
 	switch f.ShipStatus {
 	case "wait_ship":
-		// 待发货：已下单/已付款，尚未开始发货
+		// 待发货：尚未开始发货（含草稿）
 		q = q.Where("status IN ?", []string{
+			model.SelfOrderStatusDraft,
 			model.SelfOrderStatusOrdered,
 			model.SelfOrderStatusPaid,
-			model.SelfOrderStatusConfirmed, // 兼容未迁移旧数据
+			model.SelfOrderStatusConfirmed,
 		})
 	case "partial_shipped":
 		q = q.Where("status = ?", model.SelfOrderStatusPartialShipped)
@@ -165,7 +174,7 @@ func (r *SelfOrderRepo) CountStatusFacets(f SelfOrderListFilter) (*SelfOrderStat
 	for _, row := range rows {
 		out.ByStatus[row.Status] = row.Cnt
 		switch row.Status {
-		case model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid, model.SelfOrderStatusConfirmed:
+		case model.SelfOrderStatusDraft, model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid, model.SelfOrderStatusConfirmed:
 			out.WaitShip += row.Cnt
 		}
 	}

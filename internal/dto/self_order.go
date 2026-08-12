@@ -40,6 +40,8 @@ type SelfOrderInput struct {
 	FenFaRemark   string               `json:"fenFaRemark"`
 	PrinterRemark string               `json:"printerRemark"`
 	OrderedAt     string               `json:"orderedAt"`
+	// CreatedAt 可选：创建自营单时间；OrderCore 分配时传入 allocatedAt，历史回填同理
+	CreatedAt string `json:"createdAt,omitempty"`
 	// PayStatus 可选：paid 时创建即为已付款（电商订单由 OrderCore 传入）
 	PayStatus string `json:"payStatus"`
 	PaidAt    string `json:"paidAt"`

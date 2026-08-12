@@ -375,7 +375,7 @@ async function confirmBindSku(sku: WarehouseSku) {
               ¥{{ Number(order.costAmount || 0).toFixed(2) }}
             </el-descriptions-item>
             <el-descriptions-item label="付款状态">
-              {{ SELF_PAY_STATUS_MAP[order.payStatus || 'unpaid'] || order.payStatus || '未付清' }}
+              {{ SELF_PAY_STATUS_MAP[order.payStatus || 'unpaid'] || order.payStatus || '未付款' }}
             </el-descriptions-item>
             <el-descriptions-item label="付款时间">{{ order.paidAt || '—' }}</el-descriptions-item>
             <el-descriptions-item label="买家">{{ order.buyerName || '—' }}</el-descriptions-item>

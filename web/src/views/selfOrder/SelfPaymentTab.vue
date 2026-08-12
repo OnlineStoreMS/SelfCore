@@ -168,7 +168,7 @@ const payMethodLabel: Record<string, string> = {
 function payStatusLabel(status: string) {
   if (status === 'partial') return '部分付款'
   if (status === 'paid') return '已付清'
-  return '未付清'
+  return '未付款'
 }
 </script>
 
