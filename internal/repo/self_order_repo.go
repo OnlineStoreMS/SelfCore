@@ -382,6 +382,23 @@ func (r *SelfOrderRepo) CreateShipment(sh *model.SelfShipment, items []model.Sel
 	})
 }
 
+// AddShipmentItems 给已有运单追加明细（同运单号分次发货时补齐商品行）。
+func (r *SelfOrderRepo) AddShipmentItems(shipmentID uint64, items []model.SelfShipmentItem) error {
+	if shipmentID == 0 || len(items) == 0 {
+		return nil
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for i := range items {
+			items[i].TenantID = r.tenantID
+			items[i].ShipmentID = shipmentID
+			if err := tx.Create(&items[i]).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (r *SelfOrderRepo) ListShipments(selfOrderID uint64) ([]model.SelfShipment, error) {
 	var list []model.SelfShipment
 	err := r.db.Scopes(scopeTenant(r.tenantID)).

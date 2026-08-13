@@ -603,29 +603,38 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 			remark     string
 			orderItems []ordercore.OrderShipmentItemBrief
 		}
+		// 同一运单号可能对应多条 order_shipments（分次勾选商品、共用单号），需合并明细
 		logs := make([]logistics, 0)
-		seenTrack := map[string]struct{}{}
+		trackIdx := map[string]int{}
 		for _, osh := range order.Shipments {
 			tn := strings.TrimSpace(osh.ExpressNo)
 			if tn == "" {
 				continue
 			}
-			if _, ok := seenTrack[tn]; ok {
-				continue
-			}
-			seenTrack[tn] = struct{}{}
 			var shippedAt *time.Time
 			if osh.ShippedAt != nil && strings.TrimSpace(*osh.ShippedAt) != "" {
 				if t := parseDateTime(*osh.ShippedAt); t != nil {
 					shippedAt = t
 				}
 			}
+			carrier := strings.TrimSpace(osh.ExpressCompany)
+			if idx, ok := trackIdx[tn]; ok {
+				logs[idx].orderItems = mergeOrderShipmentItems(logs[idx].orderItems, osh.Items)
+				if logs[idx].carrier == "" && carrier != "" {
+					logs[idx].carrier = carrier
+				}
+				if logs[idx].shippedAt == nil && shippedAt != nil {
+					logs[idx].shippedAt = shippedAt
+				}
+				continue
+			}
+			trackIdx[tn] = len(logs)
 			logs = append(logs, logistics{
 				trackingNo: tn,
-				carrier:    strings.TrimSpace(osh.ExpressCompany),
+				carrier:    carrier,
 				shippedAt:  shippedAt,
 				remark:     fmt.Sprintf("同步自订单 %s", order.OrderNo),
-				orderItems: osh.Items,
+				orderItems: append([]ordercore.OrderShipmentItemBrief(nil), osh.Items...),
 			})
 		}
 		if len(logs) == 0 && (order.ShipStatus == "shipped" || order.ShipStatus == "partial_shipped") {
@@ -655,6 +664,8 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, ferr))
 				continue
 			}
+			remainInputs := mapOrderItemsToSelfShipInputs(entry.orderItems, byOrderItemID, shippedQty)
+
 			if existing != nil {
 				changed := false
 				if strings.TrimSpace(existing.ReceiverName) == "" && receiverName != "" {
@@ -688,6 +699,21 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 					}
 					changed = true
 				}
+				if len(remainInputs) > 0 {
+					items, berr := s.buildShipmentItems(o, remainInputs)
+					if berr != nil {
+						out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, berr))
+						out.Skipped++
+						continue
+					}
+					if err := r.AddShipmentItems(existing.ID, items); err != nil {
+						out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
+						out.Skipped++
+						continue
+					}
+					applyShippedQty(shippedQty, remainInputs)
+					changed = true
+				}
 				if changed {
 					if err := r.SaveShipment(existing); err != nil {
 						out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
@@ -699,28 +725,6 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 					out.Skipped++
 				}
 				continue
-			}
-
-			remainInputs := make([]dto.SelfShipmentItemInput, 0)
-			if len(entry.orderItems) > 0 && len(byOrderItemID) > 0 {
-				for _, oi := range entry.orderItems {
-					soItem, ok := byOrderItemID[oi.OrderItemID]
-					if !ok || oi.Qty <= 0 {
-						continue
-					}
-					left := soItem.Qty - shippedQty[soItem.ID]
-					if left <= 0 {
-						continue
-					}
-					qty := oi.Qty
-					if qty > left {
-						qty = left
-					}
-					remainInputs = append(remainInputs, dto.SelfShipmentItemInput{
-						SelfOrderItemID: soItem.ID, Qty: qty,
-					})
-					shippedQty[soItem.ID] += qty
-				}
 			}
 			// 无销售行明细映射时：仅首运单挂剩余可发数量（兼容历史）
 			if len(remainInputs) == 0 && li == 0 {
@@ -735,7 +739,6 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 					remainInputs = append(remainInputs, dto.SelfShipmentItemInput{
 						SelfOrderItemID: it.ID, Qty: remain,
 					})
-					shippedQty[it.ID] += remain
 				}
 			}
 			if len(remainInputs) == 0 && li > 0 {
@@ -809,6 +812,7 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 				out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, err))
 				continue
 			}
+			applyShippedQty(shippedQty, remainInputs)
 			out.Created++
 		}
 	}
@@ -817,6 +821,62 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 		out.Errors = append(out.Errors, err.Error())
 	}
 	return out, nil
+}
+
+func mergeOrderShipmentItems(a, b []ordercore.OrderShipmentItemBrief) []ordercore.OrderShipmentItemBrief {
+	qty := map[uint64]int{}
+	order := make([]uint64, 0, len(a)+len(b))
+	add := func(list []ordercore.OrderShipmentItemBrief) {
+		for _, it := range list {
+			if it.OrderItemID == 0 || it.Qty <= 0 {
+				continue
+			}
+			if _, ok := qty[it.OrderItemID]; !ok {
+				order = append(order, it.OrderItemID)
+			}
+			qty[it.OrderItemID] += it.Qty
+		}
+	}
+	add(a)
+	add(b)
+	out := make([]ordercore.OrderShipmentItemBrief, 0, len(order))
+	for _, id := range order {
+		out = append(out, ordercore.OrderShipmentItemBrief{OrderItemID: id, Qty: qty[id]})
+	}
+	return out
+}
+
+func mapOrderItemsToSelfShipInputs(
+	orderItems []ordercore.OrderShipmentItemBrief,
+	byOrderItemID map[uint64]model.SelfOrderItem,
+	shippedQty map[uint64]int,
+) []dto.SelfShipmentItemInput {
+	if len(orderItems) == 0 || len(byOrderItemID) == 0 {
+		return nil
+	}
+	out := make([]dto.SelfShipmentItemInput, 0, len(orderItems))
+	for _, oi := range orderItems {
+		soItem, ok := byOrderItemID[oi.OrderItemID]
+		if !ok || oi.Qty <= 0 {
+			continue
+		}
+		left := soItem.Qty - shippedQty[soItem.ID]
+		if left <= 0 {
+			continue
+		}
+		qty := oi.Qty
+		if qty > left {
+			qty = left
+		}
+		out = append(out, dto.SelfShipmentItemInput{SelfOrderItemID: soItem.ID, Qty: qty})
+	}
+	return out
+}
+
+func applyShippedQty(shippedQty map[uint64]int, inputs []dto.SelfShipmentItemInput) {
+	for _, in := range inputs {
+		shippedQty[in.SelfOrderItemID] += in.Qty
+	}
 }
 
 // SyncShipmentsByRefSoID 按销售单自动同步物流到关联自营单（发货中心/订单中心发货后调用）。
