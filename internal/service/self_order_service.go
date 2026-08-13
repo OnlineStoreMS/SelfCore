@@ -919,6 +919,51 @@ func (s *SelfOrderService) SyncShipmentsByRefSoID(ctx context.Context, bearerTok
 	return out, nil
 }
 
+// RemoveShipmentsByTracking 取消快递单后：按销售单关联自营单删除对应运单号，并重算发货状态。
+func (s *SelfOrderService) RemoveShipmentsByTracking(refSoID uint64, trackingNo string) (*dto.SyncShipmentsFromOrdersResult, error) {
+	trackingNo = strings.TrimSpace(trackingNo)
+	if refSoID == 0 || trackingNo == "" {
+		return nil, fmt.Errorf("refSoId / trackingNo 无效")
+	}
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	list, _, err := r.List(repo.SelfOrderListFilter{
+		RefSoID:  refSoID,
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := &dto.SyncShipmentsFromOrdersResult{}
+	for _, o := range list {
+		if o.Status == model.SelfOrderStatusCancelled {
+			out.Skipped++
+			continue
+		}
+		sh, ferr := r.FindShipmentByTrackingNo(o.ID, trackingNo)
+		if errors.Is(ferr, gorm.ErrRecordNotFound) {
+			out.Skipped++
+			continue
+		}
+		if ferr != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("自营单#%d: %v", o.ID, ferr))
+			out.Skipped++
+			continue
+		}
+		// 取消快递单场景允许删除（含已扣库）：商品发货单号需同步清除
+		if err := r.DeleteShipment(o.ID, sh.ID); err != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("自营单#%d: %v", o.ID, err))
+			out.Skipped++
+			continue
+		}
+		if err := s.syncSelfOrderShipStatus(o.ID); err != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("自营单#%d 重算状态: %v", o.ID, err))
+		}
+		out.Deleted++
+	}
+	return out, nil
+}
+
 func (s *SelfOrderService) ListPayments(selfOrderID uint64) ([]dto.SelfPaymentDetail, error) {
 	if _, err := s.repos.SelfOrder.ForTenant(s.tenantID).GetByID(selfOrderID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1727,6 +1772,12 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 		return err
 	}
 	if len(list) == 0 {
+		// 无物流批次：从已发货/部分发货回退到已付款（待发货）
+		if o.Status == model.SelfOrderStatusShipped || o.Status == model.SelfOrderStatusPartialShipped {
+			o.Status = model.SelfOrderStatusPaid
+			o.ShippedAt = nil
+			return r.Save(o)
+		}
 		return nil
 	}
 	shippedQty := map[uint64]int{}
@@ -1752,10 +1803,18 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 		o.Status = model.SelfOrderStatusShipped
 	case hasShipped:
 		o.Status = model.SelfOrderStatusPartialShipped
+	default:
+		if o.Status == model.SelfOrderStatusShipped || o.Status == model.SelfOrderStatusPartialShipped {
+			o.Status = model.SelfOrderStatusPaid
+			o.ShippedAt = nil
+		}
 	}
 	if hasShipped && o.ShippedAt == nil {
 		now := time.Now()
 		o.ShippedAt = &now
+	}
+	if !hasShipped {
+		o.ShippedAt = nil
 	}
 	return r.Save(o)
 }

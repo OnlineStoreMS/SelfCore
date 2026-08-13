@@ -104,9 +104,16 @@ type SyncShipmentsFromOrdersInput struct {
 	RefSoID uint64 `json:"refSoId"` // 可选：仅同步某一销售单
 }
 
+// RemoveShipmentsByTrackingInput 取消快递单后按运单号清除自营物流。
+type RemoveShipmentsByTrackingInput struct {
+	RefSoID    uint64 `json:"refSoId" binding:"required"`
+	TrackingNo string `json:"trackingNo" binding:"required"`
+}
+
 type SyncShipmentsFromOrdersResult struct {
 	Created int      `json:"created"`
 	Updated int      `json:"updated"`
 	Skipped int      `json:"skipped"`
+	Deleted int      `json:"deleted,omitempty"`
 	Errors  []string `json:"errors,omitempty"`
 }

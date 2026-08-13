@@ -275,6 +275,20 @@ func (h *SelfOrderHandler) SyncShipmentsByRefSo(c *gin.Context) {
 	response.OK(c, result)
 }
 
+func (h *SelfOrderHandler) RemoveShipmentsByTracking(c *gin.Context) {
+	var in dto.RemoveShipmentsByTrackingInput
+	if err := c.ShouldBindJSON(&in); err != nil || in.RefSoID == 0 || strings.TrimSpace(in.TrackingNo) == "" {
+		response.Fail(c, http.StatusBadRequest, "请提供 refSoId 与 trackingNo")
+		return
+	}
+	result, err := h.ps(c).RemoveShipmentsByTracking(in.RefSoID, in.TrackingNo)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, result)
+}
+
 func (h *SelfOrderHandler) ListAttachments(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {
