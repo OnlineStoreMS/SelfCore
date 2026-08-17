@@ -221,7 +221,7 @@ type ShipRequest struct {
 	ExpressCompany string          `json:"expressCompany"`
 	ExpressNo      string          `json:"expressNo"`
 	Remark         string          `json:"remark"`
-	Callback       bool            `json:"callback"`
+	Callback       *bool           `json:"callback,omitempty"`
 	Items          []ShipItemInput `json:"items,omitempty"`
 }
 

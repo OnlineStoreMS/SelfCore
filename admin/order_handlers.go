@@ -86,7 +86,8 @@ func (h *OrderHandler) Ship(c *gin.Context) {
 		return
 	}
 	// 代发采购侧「回传单号」默认回传电商平台
-	req.Callback = true
+	cb := true
+	req.Callback = &cb
 	auth := authcontext.AuthorizationHeader(c)
 	// 与前端断开解耦，避免浏览器超时取消导致订单中心回传中断
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 170*time.Second)

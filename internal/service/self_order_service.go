@@ -1367,11 +1367,12 @@ func (s *SelfOrderService) callbackOrderCore(ctx context.Context, bearerToken st
 			Qty:         sit.Qty,
 		})
 	}
+	cb := true
 	_, err := s.oc.ShipOrder(ctx, bearerToken, o.RefSoID, ordercore.ShipRequest{
 		ExpressCompany: sh.CarrierName,
 		ExpressNo:      sh.TrackingNo,
 		Remark:         sh.Remark,
-		Callback:       true,
+		Callback:       &cb,
 		Items:          items,
 	})
 	if err != nil {
