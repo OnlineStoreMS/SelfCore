@@ -19,6 +19,7 @@ import { fetchOrder, formatOrderReceiverAddress, shipOrder } from '../../api/ord
 import { retryCallback } from '../../api/selfOrder'
 import { EXPRESS_COMPANIES, findExpressCompany } from '../../constants/expressCompanies'
 import ScanImageUpload from '../../components/ScanImageUpload.vue'
+import { isSelfItemShippable } from '../../utils/selfItemTree'
 
 const props = defineProps<{ selfOrderId: number; order: SelfOrderDetail; readonly: boolean }>()
 const emit = defineEmits<{ refresh: [] }>()
@@ -123,7 +124,11 @@ interface LinePick {
   shipQty: number
   refSoId?: number
   refOrderNo?: string
-  isSplit?: boolean
+  parentSelfOrderItemId?: number
+  splitKind?: string
+  shippable: boolean
+  isSplitChild: boolean
+  isSplitParent: boolean
 }
 
 interface SalesOrderGroup {
@@ -161,39 +166,34 @@ function shippedQtyByItem(): Map<number, number> {
 
 function rebuildLinePicks() {
   const shipped = shippedQtyByItem()
-  const items = props.order.items || []
-  const hasFull = items.some((it) => it.splitKind === 'full')
-  const partialParentIds = new Set(
-    items.filter((it) => it.splitKind === 'partial' && it.parentSelfOrderItemId).map((it) => it.parentSelfOrderItemId!),
-  )
-  linePicks.value = items
-    .filter((it) => it.id)
-    .filter((it) => {
-      if (it.splitKind === 'partial' || it.splitKind === 'full') return true
-      if (hasFull) return false
-      if (it.id && partialParentIds.has(it.id)) return false
-      return true
-    })
-    .map((it) => {
-      const shippedQty = shipped.get(it.id!) || 0
-      const remaining = Math.max(0, it.qty - shippedQty)
-      const name = (it.skuSpecs || it.productName || '—').trim()
-      return {
-        selfOrderItemId: it.id!,
-        productName: it.splitKind ? name : it.productName || '—',
-        skuCode: it.skuCode || '',
-        skuSpecs: it.skuSpecs || '',
-        picUrl: it.picUrl,
-        qty: it.qty,
-        shippedQty,
-        remaining,
-        selected: remaining > 0,
-        shipQty: remaining > 0 ? remaining : 1,
-        refSoId: it.refSoId || 0,
-        refOrderNo: it.refOrderNo || '',
-        isSplit: !!(it.splitKind || it.parentSelfOrderItemId),
-      }
-    })
+  const items = (props.order.items || []).filter((it) => it.id)
+  linePicks.value = items.map((it) => {
+    const shippedQty = shipped.get(it.id!) || 0
+    const remaining = Math.max(0, it.qty - shippedQty)
+    const shippable = isSelfItemShippable(it, items)
+    const isSplitChild = !!(it.splitKind || (it.parentSelfOrderItemId && it.parentSelfOrderItemId > 0))
+    const isSplitParent = !isSplitChild && items.some((x) => x.splitKind === 'partial' && x.parentSelfOrderItemId === it.id)
+    const name = (it.skuSpecs || it.productName || '—').trim()
+    return {
+      selfOrderItemId: it.id!,
+      productName: isSplitChild ? name : (it.productName || '—'),
+      skuCode: it.skuCode || '',
+      skuSpecs: it.skuSpecs || '',
+      picUrl: it.picUrl,
+      qty: it.qty,
+      shippedQty,
+      remaining,
+      selected: false,
+      shipQty: remaining > 0 ? remaining : 1,
+      refSoId: it.refSoId || 0,
+      refOrderNo: it.refOrderNo || '',
+      parentSelfOrderItemId: it.parentSelfOrderItemId || 0,
+      splitKind: it.splitKind || '',
+      shippable,
+      isSplitChild,
+      isSplitParent,
+    }
+  })
 }
 
 function rebuildSoGroups() {
@@ -219,7 +219,7 @@ function rebuildSoGroups() {
       map.set(key, g)
     }
     g.lines.push(line)
-    g.remainingQty += line.remaining
+    if (line.shippable) g.remainingQty += line.remaining
   }
   const groups = [...map.values()]
   for (const g of groups) {
@@ -230,25 +230,56 @@ function rebuildSoGroups() {
   soGroups.value = groups
 }
 
-/** 一销售单多规格行 → 分行展示（销售单号相同） */
+/** 销售单分组下树形展示：父商品 + └ 拆分规格 */
 const soGroupRows = computed(() => {
   const rows: {
     key: string
     group: SalesOrderGroup
     line: LinePick
     lineStatus: string
+    isSplitChild: boolean
+    isSplitParent: boolean
   }[] = []
   for (const g of soGroups.value) {
+    const childrenByParent = new Map<number, LinePick[]>()
+    const fullChildren: LinePick[] = []
+    const roots: LinePick[] = []
     for (const line of g.lines) {
-      const done = line.remaining <= 0
-      const partial = line.shippedQty > 0 && !done
+      if (line.splitKind === 'full') {
+        fullChildren.push(line)
+        continue
+      }
+      if (line.isSplitChild && line.parentSelfOrderItemId) {
+        const list = childrenByParent.get(line.parentSelfOrderItemId) || []
+        list.push(line)
+        childrenByParent.set(line.parentSelfOrderItemId, list)
+        continue
+      }
+      roots.push(line)
+    }
+    const pushLine = (line: LinePick, isChild: boolean, isParent: boolean, kids: LinePick[] = []) => {
+      let status = '待发货'
+      if (!line.shippable && kids.length) {
+        const done = kids.every((k) => k.remaining <= 0)
+        const partial = kids.some((k) => k.shippedQty > 0) && !done
+        status = done ? '已登记物流' : partial ? '部分发货' : '已拆分'
+      } else if (line.remaining <= 0) status = '已登记物流'
+      else if (line.shippedQty > 0) status = '部分发货'
       rows.push({
         key: `${g.key}:${line.selfOrderItemId}`,
         group: g,
         line,
-        lineStatus: done ? '已登记物流' : partial ? '部分发货' : '待发货',
+        lineStatus: status,
+        isSplitChild: isChild,
+        isSplitParent: isParent,
       })
     }
+    for (const root of roots) {
+      const kids = childrenByParent.get(root.selfOrderItemId) || []
+      pushLine(root, false, kids.length > 0, kids)
+      for (const ch of kids) pushLine(ch, true, false)
+    }
+    for (const ch of fullChildren) pushLine(ch, true, false)
   }
   return rows
 })
@@ -363,16 +394,17 @@ async function openCreateDropship(group: SalesOrderGroup, preferItemId?: number)
   resetForm()
   activeGroupKey.value = group.key
   const prefer = preferItemId && preferItemId > 0 ? preferItemId : 0
-  linePicks.value = group.lines.map((l) => {
-    const canShip = l.remaining > 0
-    // 指定行发货时默认只勾该行；否则可勾选全部待发（可再取消）
-    const selected = canShip && (!prefer || l.selfOrderItemId === prefer)
-    return {
-      ...l,
-      selected,
-      shipQty: canShip ? l.remaining : 1,
-    }
-  })
+  linePicks.value = group.lines
+    .filter((l) => l.shippable)
+    .map((l) => {
+      const canShip = l.remaining > 0
+      const selected = canShip && (!prefer || l.selfOrderItemId === prefer)
+      return {
+        ...l,
+        selected,
+        shipQty: canShip ? l.remaining : 1,
+      }
+    })
   dialogVisible.value = true
   await fillReceiverFromOrder(group.refSoId)
 }
@@ -585,23 +617,38 @@ const activeGroup = computed(() =>
   <div v-loading="loading">
     <div v-if="!readonly" class="toolbar">
       <el-button type="primary" plain :loading="syncing" @click="handleSyncFromOrders()">同步物流</el-button>
-<span class="hint">支持按商品分批发货（含订单中心拆分段）；全部发出后单据为「已发货」，否则「部分发货」</span>
+<span class="hint">拆分规格树形展示（对齐订单中心）；按可发规格分批发货，全部发出后为「已发货」，否则「部分发货」</span>
     </div>
 
     <el-table :data="soGroupRows" border stripe class="so-group-table" row-key="key">
       <el-table-column label="销售单" width="160" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.group.refOrderNo }}</template>
+        <template #default="{ row }">
+          <span v-if="row.isSplitChild" class="muted">└</span>
+          <span v-else>{{ row.group.refOrderNo }}</span>
+        </template>
       </el-table-column>
-      <el-table-column label="规格" min-width="220" show-overflow-tooltip>
-        <template #default="{ row }">{{ formatSpecLabel(row.line.skuSpecs, row.line.qty) }}</template>
+      <el-table-column label="规格" min-width="240" show-overflow-tooltip>
+        <template #default="{ row }">
+          <div class="spec-cell" :class="{ child: row.isSplitChild }">
+            <span v-if="row.isSplitChild" class="tree-prefix">└</span>
+            <span v-if="row.isSplitChild">{{ formatSpecLabel(row.line.skuSpecs || row.line.productName, row.line.qty) }}</span>
+            <span v-else>{{ row.line.productName || formatSpecLabel(row.line.skuSpecs, row.line.qty) }}</span>
+            <el-tag v-if="row.isSplitParent" size="small" type="warning" effect="plain" class="split-tag">已拆分</el-tag>
+            <el-tag v-else-if="row.isSplitChild" size="small" type="info" effect="plain" class="split-tag">拆分</el-tag>
+          </div>
+        </template>
       </el-table-column>
       <el-table-column label="待发" width="80" align="center">
         <template #default="{ row }">
-          <span :class="{ muted: row.line.remaining <= 0 }">{{ row.line.remaining }}</span>
+          <span v-if="row.line.shippable" :class="{ muted: row.line.remaining <= 0 }">{{ row.line.remaining }}</span>
+          <span v-else class="muted">—</span>
         </template>
       </el-table-column>
       <el-table-column label="物流" min-width="160" show-overflow-tooltip>
-        <template #default="{ row }">{{ lineLogisticsText(row.line.selfOrderItemId) }}</template>
+        <template #default="{ row }">
+          <span v-if="row.line.shippable">{{ lineLogisticsText(row.line.selfOrderItemId) }}</span>
+          <span v-else class="muted">—</span>
+        </template>
       </el-table-column>
       <el-table-column label="状态" width="100" align="center">
         <template #default="{ row }">{{ row.lineStatus }}</template>
@@ -609,6 +656,7 @@ const activeGroup = computed(() =>
       <el-table-column v-if="!readonly" label="操作" width="180" fixed="right">
         <template #default="{ row }">
           <el-button
+            v-if="row.line.shippable"
             type="primary"
             link
             :disabled="row.line.remaining <= 0"
@@ -617,6 +665,7 @@ const activeGroup = computed(() =>
             发货
           </el-button>
           <el-button
+            v-if="!row.isSplitChild"
             type="success"
             link
             :disabled="!row.group.refSoId"
@@ -894,5 +943,19 @@ const activeGroup = computed(() =>
   width: 36px;
   height: 36px;
   border-radius: 4px;
+}
+.spec-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.spec-cell.child {
+  color: var(--el-text-color-regular);
+}
+.tree-prefix {
+  color: var(--el-text-color-placeholder);
+}
+.split-tag {
+  flex-shrink: 0;
 }
 </style>

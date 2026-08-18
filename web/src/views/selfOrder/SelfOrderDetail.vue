@@ -28,6 +28,7 @@ import SelfShipmentTab from './SelfShipmentTab.vue'
 import SelfPaymentTab from './SelfPaymentTab.vue'
 import { SELF_PAY_STATUS_MAP } from '../../api/selfOrderTracking'
 import { orderCoreOrderUrl } from '../../utils/runtimeConfig'
+import { buildSelfItemTreeRows, selfItemTreeTitle } from '../../utils/selfItemTree'
 
 const route = useRoute()
 const router = useRouter()
@@ -86,6 +87,9 @@ const logisticsByItem = computed(() => {
   }
   return map
 })
+
+const itemTreeRows = computed(() => buildSelfItemTreeRows(order.value?.items))
+
 
 const canRetryStock = computed(() => {
   if (!order.value) return false
@@ -388,13 +392,13 @@ async function confirmBindSku(sku: WarehouseSku) {
           </el-descriptions>
 
           <h4 class="section-title">商品明细</h4>
-          <el-table :data="order.items" border stripe>
+          <el-table :data="itemTreeRows" border stripe row-key="key">
             <el-table-column label="图片" width="72" align="center">
               <template #default="{ row }">
                 <el-image
-                  v-if="row.picUrl"
-                  :src="row.picUrl"
-                  :preview-src-list="[row.picUrl]"
+                  v-if="!row.fullGroupHeader && row.item.picUrl"
+                  :src="row.item.picUrl"
+                  :preview-src-list="[row.item.picUrl]"
                   fit="cover"
                   style="width: 40px; height: 40px; border-radius: 4px"
                   preview-teleported
@@ -404,68 +408,90 @@ async function confirmBindSku(sku: WarehouseSku) {
             </el-table-column>
             <el-table-column label="销售单" width="140" show-overflow-tooltip>
               <template #default="{ row }">
-                <span
-                  v-if="row.refSoId"
-                  class="link-text"
-                  @click="openOrderCore(row.refSoId)"
-                >{{ row.refOrderNo || `#${row.refSoId}` }}</span>
-                <span v-else>{{ row.refOrderNo || '—' }}</span>
+                <span v-if="row.isSplitChild || row.fullGroupHeader" class="muted">└</span>
+                <template v-else>
+                  <span
+                    v-if="row.item.refSoId"
+                    class="link-text"
+                    @click="openOrderCore(row.item.refSoId)"
+                  >{{ row.item.refOrderNo || `#${row.item.refSoId}` }}</span>
+                  <span v-else>{{ row.item.refOrderNo || '—' }}</span>
+                </template>
               </template>
             </el-table-column>
             <el-table-column label="规格" min-width="240" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.skuSpecs || '—' }}</template>
+              <template #default="{ row }">
+                <div class="spec-cell" :class="{ child: row.isSplitChild || row.fullGroupHeader }">
+                  <span v-if="row.isSplitChild" class="tree-prefix">└</span>
+                  <span>{{ selfItemTreeTitle(row) }}</span>
+                  <el-tag v-if="row.isSplitParent" size="small" type="warning" effect="plain" class="split-tag">已拆分</el-tag>
+                  <el-tag v-else-if="row.isSplitChild" size="small" type="info" effect="plain" class="split-tag">拆分</el-tag>
+                </div>
+              </template>
             </el-table-column>
             <el-table-column label="库存 SKU" width="180">
               <template #default="{ row }">
-                <div class="inv-sku-cell">
-                  <span v-if="row.invSkuCode">{{ row.invSkuCode }}</span>
+                <div v-if="!row.isSplitChild && !row.fullGroupHeader" class="inv-sku-cell">
+                  <span v-if="row.item.invSkuCode">{{ row.item.invSkuCode }}</span>
                   <span v-else class="muted">未绑定</span>
                   <el-button
                     v-if="canEditCost"
                     link
                     type="primary"
                     size="small"
-                    @click="openBindDialog(row)"
-                  >{{ row.invSkuCode ? '更换' : '绑定' }}</el-button>
+                    @click="openBindDialog(row.item)"
+                  >{{ row.item.invSkuCode ? '更换' : '绑定' }}</el-button>
                 </div>
+                <span v-else class="muted">—</span>
               </template>
             </el-table-column>
-            <el-table-column prop="qty" label="数量" width="70" align="center" />
+            <el-table-column label="数量" width="70" align="center">
+              <template #default="{ row }">{{ row.fullGroupHeader ? '—' : row.item.qty }}</template>
+            </el-table-column>
             <el-table-column label="实付金额" width="100" align="right">
               <template #default="{ row }">
-                <span v-if="row.saleAmount > 0">¥{{ Number(row.saleAmount).toFixed(2) }}</span>
+                <span v-if="!row.isSplitChild && !row.fullGroupHeader && row.item.saleAmount > 0">¥{{ Number(row.item.saleAmount).toFixed(2) }}</span>
                 <span v-else class="muted">—</span>
               </template>
             </el-table-column>
             <el-table-column label="成本单价" width="130" align="right">
               <template #default="{ row }">
-                <el-input-number
-                  v-if="canEditCost"
-                  :model-value="Number(row.costUnitPrice || 0)"
-                  :min="0"
-                  :precision="2"
-                  :step="0.01"
-                  controls-position="right"
-                  size="small"
-                  style="width: 118px"
-                  :disabled="costSaving"
-                  @change="(v: number | undefined) => onCostChange(row, v)"
-                />
-                <span v-else>¥{{ Number(row.costUnitPrice || 0).toFixed(2) }}</span>
+                <template v-if="!row.isSplitChild && !row.fullGroupHeader">
+                  <el-input-number
+                    v-if="canEditCost"
+                    :model-value="Number(row.item.costUnitPrice || 0)"
+                    :min="0"
+                    :precision="2"
+                    :step="0.01"
+                    controls-position="right"
+                    size="small"
+                    style="width: 118px"
+                    :disabled="costSaving"
+                    @change="(v: number | undefined) => onCostChange(row.item, v)"
+                  />
+                  <span v-else>¥{{ Number(row.item.costUnitPrice || 0).toFixed(2) }}</span>
+                </template>
+                <span v-else class="muted">—</span>
               </template>
             </el-table-column>
             <el-table-column label="成本小计" width="100" align="right">
-              <template #default="{ row }">¥{{ Number(row.costAmount || 0).toFixed(2) }}</template>
+              <template #default="{ row }">
+                <span v-if="!row.isSplitChild && !row.fullGroupHeader">¥{{ Number(row.item.costAmount || 0).toFixed(2) }}</span>
+                <span v-else class="muted">—</span>
+              </template>
             </el-table-column>
             <el-table-column label="物流" min-width="140" show-overflow-tooltip>
               <template #default="{ row }">
-                <template v-if="row.id && logisticsByItem.get(row.id)?.length">
-                  <div v-for="t in logisticsByItem.get(row.id)" :key="t">{{ t }}</div>
+                <template v-if="row.item.id && logisticsByItem.get(row.item.id)?.length">
+                  <div v-for="t in logisticsByItem.get(row.item.id)" :key="t">{{ t }}</div>
                 </template>
+                <span v-else-if="row.isSplitParent" class="muted">见拆分行</span>
                 <span v-else class="muted">未发货</span>
               </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
+            <el-table-column label="备注" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.isSplitChild || row.fullGroupHeader ? '—' : (row.item.remark || '—') }}</template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
 
@@ -592,5 +618,20 @@ async function confirmBindSku(sku: WarehouseSku) {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.spec-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.spec-cell.child {
+  color: var(--el-text-color-regular);
+}
+.tree-prefix {
+  color: var(--el-text-color-placeholder);
+}
+.split-tag {
+  flex-shrink: 0;
 }
 </style>
