@@ -275,6 +275,20 @@ func (h *SelfOrderHandler) SyncShipmentsByRefSo(c *gin.Context) {
 	response.OK(c, result)
 }
 
+func (h *SelfOrderHandler) SyncSplitItemsByRefSo(c *gin.Context) {
+	var in dto.SyncSplitItemsByRefSoInput
+	if err := c.ShouldBindJSON(&in); err != nil || in.RefSoID == 0 {
+		response.Fail(c, http.StatusBadRequest, "请提供 refSoId")
+		return
+	}
+	result, err := h.ps(c).SyncSplitItemsByRefSo(c.Request.Context(), authcontext.BearerToken(c), &in)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, result)
+}
+
 func (h *SelfOrderHandler) RemoveShipmentsByTracking(c *gin.Context) {
 	var in dto.RemoveShipmentsByTrackingInput
 	if err := c.ShouldBindJSON(&in); err != nil || in.RefSoID == 0 || strings.TrimSpace(in.TrackingNo) == "" {

@@ -312,6 +312,18 @@ func (r *SelfOrderRepo) SaveItem(it *model.SelfOrderItem) error {
 	return r.db.Save(it).Error
 }
 
+func (r *SelfOrderRepo) CreateItem(it *model.SelfOrderItem) error {
+	it.TenantID = r.tenantID
+	return r.db.Create(it).Error
+}
+
+func (r *SelfOrderRepo) DeleteItems(ids []uint64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return r.db.Scopes(scopeTenant(r.tenantID)).Where("id IN ?", ids).Delete(&model.SelfOrderItem{}).Error
+}
+
 func (r *SelfOrderRepo) GetItem(id uint64) (*model.SelfOrderItem, error) {
 	var it model.SelfOrderItem
 	err := r.db.Scopes(scopeTenant(r.tenantID)).First(&it, id).Error

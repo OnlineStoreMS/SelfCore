@@ -42,7 +42,11 @@ export interface SelfOrderItem {
   costUnitPrice: number
   costAmount: number
   refSoId: number
+  refOrderItemId?: number
   refOrderNo: string
+  parentSelfOrderItemId?: number
+  splitKind?: '' | 'partial' | 'full'
+  shipPlanLineId?: number
   remark: string
 }
 

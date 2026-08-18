@@ -80,6 +80,10 @@ type SelfOrderItem struct {
 	RefSoID        uint64    `gorm:"index;default:0" json:"refSoId"`
 	RefOrderItemID uint64    `gorm:"index;default:0" json:"refOrderItemId"`
 	RefOrderNo     string    `gorm:"size:64;index" json:"refOrderNo"`
+	// 拆分发货：子行指向原自营明细；整单拆分子行为 0
+	ParentSelfOrderItemID uint64 `gorm:"index;default:0" json:"parentSelfOrderItemId"`
+	SplitKind             string `gorm:"size:16;index" json:"splitKind,omitempty"`
+	ShipPlanLineID        uint64 `gorm:"index;default:0" json:"shipPlanLineId,omitempty"`
 	Remark         string    `gorm:"type:text" json:"remark"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`

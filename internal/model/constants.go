@@ -41,6 +41,10 @@ const (
 	SelfOrderStatusCompleted      = "completed"
 	SelfOrderStatusCancelled      = "cancelled"
 
+	// 拆分发货（对齐订单中心）
+	SplitKindPartial = "partial"
+	SplitKindFull    = "full"
+
 	// SelfOrderStatusConfirmed 历史别名（已迁移为 ordered/paid，仅兼容旧数据读取）
 	SelfOrderStatusConfirmed = "confirmed"
 )

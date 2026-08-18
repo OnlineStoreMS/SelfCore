@@ -95,6 +95,9 @@ type SelfOrderItemDTO struct {
 	RefSoID        uint64  `json:"refSoId"`
 	RefOrderItemID uint64  `json:"refOrderItemId"`
 	RefOrderNo     string  `json:"refOrderNo"`
+	ParentSelfOrderItemID uint64 `json:"parentSelfOrderItemId,omitempty"`
+	SplitKind             string `json:"splitKind,omitempty"`
+	ShipPlanLineID        uint64 `json:"shipPlanLineId,omitempty"`
 	Remark         string  `json:"remark"`
 }
 
@@ -155,6 +158,28 @@ type SelfCancelByRefInput struct {
 
 type SelfDeleteByRefInput struct {
 	RefSoID uint64 `json:"refSoId" binding:"required"`
+}
+
+// SyncSplitItemsByRefSoInput 订单中心拆分计划同步到关联自营单。
+type SyncSplitItemsByRefSoInput struct {
+	RefSoID uint64                 `json:"refSoId" binding:"required"`
+	Mode    string                 `json:"mode"`
+	Lines   []SyncSplitItemLineIn  `json:"lines"`
+}
+
+type SyncSplitItemLineIn struct {
+	RefOrderItemID       uint64 `json:"refOrderItemId"`
+	ParentRefOrderItemID uint64 `json:"parentRefOrderItemId"`
+	SkuName              string `json:"skuName"`
+	Qty                  int    `json:"qty"`
+	ShipPlanLineID       uint64 `json:"shipPlanLineId"`
+	SplitKind            string `json:"splitKind"`
+}
+
+type SyncSplitItemsByRefSoResult struct {
+	Updated int      `json:"updated"`
+	Skipped int      `json:"skipped"`
+	Errors  []string `json:"errors,omitempty"`
 }
 
 type SelfCancelInput struct {

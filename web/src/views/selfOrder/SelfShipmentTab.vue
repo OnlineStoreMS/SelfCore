@@ -123,6 +123,7 @@ interface LinePick {
   shipQty: number
   refSoId?: number
   refOrderNo?: string
+  isSplit?: boolean
 }
 
 interface SalesOrderGroup {
@@ -160,14 +161,26 @@ function shippedQtyByItem(): Map<number, number> {
 
 function rebuildLinePicks() {
   const shipped = shippedQtyByItem()
-  linePicks.value = (props.order.items || [])
+  const items = props.order.items || []
+  const hasFull = items.some((it) => it.splitKind === 'full')
+  const partialParentIds = new Set(
+    items.filter((it) => it.splitKind === 'partial' && it.parentSelfOrderItemId).map((it) => it.parentSelfOrderItemId!),
+  )
+  linePicks.value = items
     .filter((it) => it.id)
+    .filter((it) => {
+      if (it.splitKind === 'partial' || it.splitKind === 'full') return true
+      if (hasFull) return false
+      if (it.id && partialParentIds.has(it.id)) return false
+      return true
+    })
     .map((it) => {
       const shippedQty = shipped.get(it.id!) || 0
       const remaining = Math.max(0, it.qty - shippedQty)
+      const name = (it.skuSpecs || it.productName || '—').trim()
       return {
         selfOrderItemId: it.id!,
-        productName: it.productName || '—',
+        productName: it.splitKind ? name : it.productName || '—',
         skuCode: it.skuCode || '',
         skuSpecs: it.skuSpecs || '',
         picUrl: it.picUrl,
@@ -178,6 +191,7 @@ function rebuildLinePicks() {
         shipQty: remaining > 0 ? remaining : 1,
         refSoId: it.refSoId || 0,
         refOrderNo: it.refOrderNo || '',
+        isSplit: !!(it.splitKind || it.parentSelfOrderItemId),
       }
     })
 }
@@ -571,7 +585,7 @@ const activeGroup = computed(() =>
   <div v-loading="loading">
     <div v-if="!readonly" class="toolbar">
       <el-button type="primary" plain :loading="syncing" @click="handleSyncFromOrders()">同步物流</el-button>
-      <span class="hint">支持按商品分批发货（一商品可对应一个快递单号）；全部发出后单据为「已发货」，否则「部分发货」</span>
+<span class="hint">支持按商品分批发货（含订单中心拆分段）；全部发出后单据为「已发货」，否则「部分发货」</span>
     </div>
 
     <el-table :data="soGroupRows" border stripe class="so-group-table" row-key="key">

@@ -29,15 +29,18 @@ func NewClient(baseURL string) *Client {
 }
 
 type OrderItemBrief struct {
-	ID          uint64  `json:"id"`
-	SkuID       uint64  `json:"skuId"`
-	SkuCode     string  `json:"skuCode"`
-	ProductName string  `json:"productName"`
-	SkuSpecs    string  `json:"skuSpecs"`
-	PicURL      string  `json:"picUrl"`
-	Quantity    int     `json:"quantity"`
-	Price       float64 `json:"price"`
-	TotalAmount float64 `json:"totalAmount"`
+	ID                uint64  `json:"id"`
+	SkuID             uint64  `json:"skuId"`
+	SkuCode           string  `json:"skuCode"`
+	ProductName       string  `json:"productName"`
+	SkuSpecs          string  `json:"skuSpecs"`
+	PicURL            string  `json:"picUrl"`
+	Quantity          int     `json:"quantity"`
+	Price             float64 `json:"price"`
+	TotalAmount       float64 `json:"totalAmount"`
+	ParentOrderItemID uint64  `json:"parentOrderItemId"`
+	SplitKind         string  `json:"splitKind,omitempty"`
+	ShipPlanLineID    uint64  `json:"shipPlanLineId,omitempty"`
 }
 
 type OrderAddressBrief struct {

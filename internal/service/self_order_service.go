@@ -650,7 +650,25 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 		}
 
 		byOrderItemID := map[uint64]model.SelfOrderItem{}
-		for _, it := range g.items {
+		if err := s.ensureSplitChildrenFromOrder(o, order); err != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("%s 同步拆分: %v", order.OrderNo, err))
+		}
+		if refreshed, rerr := r.GetWithItems(selfOrderID); rerr == nil {
+			o = refreshed
+		}
+		g.items = nil
+		for _, it := range o.Items {
+			refSoID := it.RefSoID
+			if refSoID == 0 {
+				refSoID = o.RefSoID
+			}
+			if filterSoID > 0 && refSoID != filterSoID {
+				continue
+			}
+			if refSoID != g.refSoID {
+				continue
+			}
+			g.items = append(g.items, it)
 			if it.RefOrderItemID > 0 {
 				byOrderItemID[it.RefOrderItemID] = it
 			}
@@ -877,6 +895,227 @@ func applyShippedQty(shippedQty map[uint64]int, inputs []dto.SelfShipmentItemInp
 	for _, in := range inputs {
 		shippedQty[in.SelfOrderItemID] += in.Qty
 	}
+}
+
+// SyncSplitItemsByRefSo 按销售单把拆分子行同步到关联自营单（订单中心保存拆分计划后调用）。
+func (s *SelfOrderService) SyncSplitItemsByRefSo(ctx context.Context, bearerToken string, in *dto.SyncSplitItemsByRefSoInput) (*dto.SyncSplitItemsByRefSoResult, error) {
+	out := &dto.SyncSplitItemsByRefSoResult{}
+	if in == nil || in.RefSoID == 0 {
+		return out, fmt.Errorf("refSoId 无效")
+	}
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	list, _, err := r.List(repo.SelfOrderListFilter{RefSoID: in.RefSoID, Page: 1, PageSize: 50})
+	if err != nil {
+		return out, err
+	}
+	if len(list) == 0 {
+		out.Skipped = 1
+		return out, nil
+	}
+	var order *ordercore.OrderBrief
+	if s.oc != nil && bearerToken != "" {
+		if o, gerr := s.oc.GetOrder(ctx, bearerToken, in.RefSoID); gerr == nil {
+			order = o
+		}
+	}
+	for _, so := range list {
+		if so.Status == model.SelfOrderStatusCancelled {
+			out.Skipped++
+			continue
+		}
+		full, gerr := r.GetWithItems(so.ID)
+		if gerr != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("自营单#%d: %v", so.ID, gerr))
+			out.Skipped++
+			continue
+		}
+		var serr error
+		if order != nil {
+			serr = s.ensureSplitChildrenFromOrder(full, order)
+		} else {
+			serr = s.applySplitLinesToSelfOrder(full, in)
+		}
+		if serr != nil {
+			out.Errors = append(out.Errors, fmt.Sprintf("自营单#%d: %v", so.ID, serr))
+			out.Skipped++
+			continue
+		}
+		out.Updated++
+	}
+	return out, nil
+}
+
+// ensureSplitChildrenFromOrder 按订单中心当前拆分子行重建自营拆分子行（保留已发子行）。
+func (s *SelfOrderService) ensureSplitChildrenFromOrder(o *model.SelfOrder, order *ordercore.OrderBrief) error {
+	if o == nil || order == nil {
+		return nil
+	}
+	in := &dto.SyncSplitItemsByRefSoInput{RefSoID: order.ID, Lines: nil}
+	hasChild := false
+	for _, it := range order.Items {
+		kind := strings.TrimSpace(it.SplitKind)
+		if kind == "" {
+			continue
+		}
+		hasChild = true
+		in.Mode = kind
+		in.Lines = append(in.Lines, dto.SyncSplitItemLineIn{
+			RefOrderItemID:       it.ID,
+			ParentRefOrderItemID: it.ParentOrderItemID,
+			SkuName:              firstNonEmpty(it.SkuSpecs, it.ProductName),
+			Qty:                  it.Quantity,
+			ShipPlanLineID:       it.ShipPlanLineID,
+			SplitKind:            kind,
+		})
+	}
+	if !hasChild {
+		in.Mode = ""
+		in.Lines = nil
+	}
+	return s.applySplitLinesToSelfOrder(o, in)
+}
+
+func (s *SelfOrderService) applySplitLinesToSelfOrder(o *model.SelfOrder, in *dto.SyncSplitItemsByRefSoInput) error {
+	if o == nil || in == nil {
+		return nil
+	}
+	r := s.repos.SelfOrder.ForTenant(s.tenantID)
+	shippedQty, err := r.SumShippedQtyByItem(o.ID)
+	if err != nil {
+		return err
+	}
+
+	rootByRef := map[uint64]model.SelfOrderItem{}
+	children := make([]model.SelfOrderItem, 0)
+	for _, it := range o.Items {
+		if strings.TrimSpace(it.SplitKind) != "" {
+			children = append(children, it)
+			continue
+		}
+		if it.RefOrderItemID > 0 {
+			rootByRef[it.RefOrderItemID] = it
+		}
+	}
+
+	byPlan := map[uint64]*model.SelfOrderItem{}
+	byRefChild := map[uint64]*model.SelfOrderItem{}
+	for i := range children {
+		ch := &children[i]
+		if ch.ShipPlanLineID > 0 {
+			byPlan[ch.ShipPlanLineID] = ch
+		}
+		if ch.RefOrderItemID > 0 {
+			byRefChild[ch.RefOrderItemID] = ch
+		}
+	}
+
+	keepIDs := map[uint64]struct{}{}
+	mode := strings.TrimSpace(in.Mode)
+	for _, line := range in.Lines {
+		kind := strings.TrimSpace(line.SplitKind)
+		if kind == "" {
+			kind = mode
+		}
+		if kind != model.SplitKindPartial && kind != model.SplitKindFull {
+			continue
+		}
+		qty := line.Qty
+		if qty <= 0 {
+			qty = 1
+		}
+		sku := strings.TrimSpace(line.SkuName)
+		if sku == "" {
+			sku = "拆分规格"
+		}
+		var parentSelfID uint64
+		var template model.SelfOrderItem
+		if kind == model.SplitKindPartial {
+			parent, ok := rootByRef[line.ParentRefOrderItemID]
+			if !ok {
+				continue
+			}
+			parentSelfID = parent.ID
+			template = parent
+		} else if len(rootByRef) > 0 {
+			for _, root := range rootByRef {
+				template = root
+				break
+			}
+		}
+
+		var existing *model.SelfOrderItem
+		if line.ShipPlanLineID > 0 {
+			existing = byPlan[line.ShipPlanLineID]
+		}
+		if existing == nil && line.RefOrderItemID > 0 {
+			existing = byRefChild[line.RefOrderItemID]
+		}
+		if existing != nil {
+			keepIDs[existing.ID] = struct{}{}
+			existing.Qty = qty
+			existing.SkuSpecs = sku
+			existing.ProductName = sku
+			existing.SplitKind = kind
+			existing.ParentSelfOrderItemID = parentSelfID
+			existing.ShipPlanLineID = line.ShipPlanLineID
+			if line.RefOrderItemID > 0 {
+				existing.RefOrderItemID = line.RefOrderItemID
+			}
+			if existing.RefSoID == 0 {
+				existing.RefSoID = in.RefSoID
+				if existing.RefSoID == 0 {
+					existing.RefSoID = o.RefSoID
+				}
+			}
+			if err := r.SaveItem(existing); err != nil {
+				return err
+			}
+			continue
+		}
+
+		child := model.SelfOrderItem{
+			SelfOrderID:           o.ID,
+			PimSkuID:              template.PimSkuID,
+			SkuCode:               template.SkuCode,
+			ProductName:           sku,
+			SkuSpecs:              sku,
+			PicURL:                template.PicURL,
+			Qty:                   qty,
+			InvSkuID:              template.InvSkuID,
+			InvSkuCode:            template.InvSkuCode,
+			RefSoID:               firstUint64(template.RefSoID, o.RefSoID, in.RefSoID),
+			RefOrderItemID:        line.RefOrderItemID,
+			RefOrderNo:            firstNonEmpty(template.RefOrderNo, o.RefTraceID),
+			ParentSelfOrderItemID: parentSelfID,
+			SplitKind:             kind,
+			ShipPlanLineID:        line.ShipPlanLineID,
+		}
+		if err := r.CreateItem(&child); err != nil {
+			return err
+		}
+		keepIDs[child.ID] = struct{}{}
+	}
+
+	toDelete := make([]uint64, 0)
+	for _, ch := range children {
+		if _, ok := keepIDs[ch.ID]; ok {
+			continue
+		}
+		if shippedQty[ch.ID] > 0 {
+			continue
+		}
+		toDelete = append(toDelete, ch.ID)
+	}
+	return r.DeleteItems(toDelete)
+}
+
+func firstUint64(vals ...uint64) uint64 {
+	for _, v := range vals {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 // SyncShipmentsByRefSoID 按销售单自动同步物流到关联自营单（发货中心/订单中心发货后调用）。
@@ -1259,6 +1498,9 @@ func (s *SelfOrderService) Ship(ctx context.Context, bearerToken string, id uint
 	}
 	var items []dto.SelfShipmentItemInput
 	for _, it := range o.Items {
+		if !isShippableSelfOrderItem(o, it) {
+			continue
+		}
 		remain := it.Qty - shippedQty[it.ID]
 		if remain > 0 {
 			items = append(items, dto.SelfShipmentItemInput{SelfOrderItemID: it.ID, Qty: remain})
@@ -1793,6 +2035,9 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 	}
 	fullyShipped := true
 	for _, it := range o.Items {
+		if !isShippableSelfOrderItem(o, it) {
+			continue
+		}
 		if shippedQty[it.ID] < it.Qty {
 			fullyShipped = false
 			break
@@ -1800,7 +2045,7 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 	}
 	switch {
 	case fullyShipped && hasShipped:
-		// 全部明细发完 → 已发货（可再点「完成」归档）
+		// 全部可发明细发完 → 已发货（可再点「完成」归档）
 		o.Status = model.SelfOrderStatusShipped
 	case hasShipped:
 		o.Status = model.SelfOrderStatusPartialShipped
@@ -1818,6 +2063,32 @@ func (s *SelfOrderService) syncSelfOrderShipStatus(selfOrderID uint64) error {
 		o.ShippedAt = nil
 	}
 	return r.Save(o)
+}
+
+func isShippableSelfOrderItem(o *model.SelfOrder, it model.SelfOrderItem) bool {
+	if strings.TrimSpace(it.SplitKind) != "" {
+		return true
+	}
+	if o == nil {
+		return true
+	}
+	hasFull := false
+	parentHasPartial := false
+	for _, x := range o.Items {
+		if x.SplitKind == model.SplitKindFull {
+			hasFull = true
+		}
+		if x.SplitKind == model.SplitKindPartial && x.ParentSelfOrderItemID == it.ID {
+			parentHasPartial = true
+		}
+	}
+	if hasFull {
+		return false
+	}
+	if parentHasPartial {
+		return false
+	}
+	return true
 }
 
 func (s *SelfOrderService) toShipmentDTO(sh *model.SelfShipment) dto.SelfShipmentDTO {
@@ -1897,7 +2168,9 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 			Qty: it.Qty, SaleUnitPrice: it.SaleUnitPrice, SaleAmount: it.SaleAmount,
 			InvSkuID: it.InvSkuID, InvSkuCode: it.InvSkuCode,
 			CostUnitPrice: it.CostUnitPrice, CostAmount: it.CostAmount,
-			RefSoID: it.RefSoID, RefOrderItemID: it.RefOrderItemID, RefOrderNo: it.RefOrderNo, Remark: it.Remark,
+			RefSoID: it.RefSoID, RefOrderItemID: it.RefOrderItemID, RefOrderNo: it.RefOrderNo,
+			ParentSelfOrderItemID: it.ParentSelfOrderItemID, SplitKind: it.SplitKind, ShipPlanLineID: it.ShipPlanLineID,
+			Remark: it.Remark,
 		})
 	}
 	if d.Items == nil {
