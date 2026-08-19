@@ -5,14 +5,13 @@ export type SelfItemTreeRow = {
   item: SelfOrderItem
   isSplitChild: boolean
   isSplitParent: boolean
-  fullGroupHeader?: boolean
 }
 
 function isSplitChildItem(it: SelfOrderItem) {
   return !!(it.splitKind || (it.parentSelfOrderItemId && it.parentSelfOrderItemId > 0))
 }
 
-/** 详情/物流：根行 + └ 拆分子行（整单拆分单独分组） */
+/** 详情/物流：根行 + └ 拆分子行（对齐供应链中心） */
 export function buildSelfItemTreeRows(items: SelfOrderItem[] | undefined): SelfItemTreeRow[] {
   if (!items?.length) return []
   const childrenByParent = new Map<number, SelfOrderItem[]>()
@@ -49,50 +48,24 @@ export function buildSelfItemTreeRows(items: SelfOrderItem[] | undefined): SelfI
       })
     }
   }
-  if (fullChildren.length) {
+  // 整单拆分：无父行，直接以拆分子行展示（与供应链一致）
+  for (const ch of fullChildren) {
     out.push({
-      key: 'full-header',
-      item: {
-        id: 0,
-        pimSkuId: 0,
-        skuCode: '',
-        productName: '整单拆分',
-        skuSpecs: '',
-        picUrl: '',
-        qty: 0,
-        saleUnitPrice: 0,
-        saleAmount: 0,
-        invSkuId: 0,
-        invSkuCode: '',
-        costUnitPrice: 0,
-        costAmount: 0,
-        refSoId: 0,
-        refOrderNo: '',
-        remark: '',
-      },
-      isSplitChild: false,
+      key: `full-${ch.id}`,
+      item: ch,
+      isSplitChild: true,
       isSplitParent: false,
-      fullGroupHeader: true,
     })
-    for (const ch of fullChildren) {
-      out.push({
-        key: `full-${ch.id}`,
-        item: ch,
-        isSplitChild: true,
-        isSplitParent: false,
-      })
-    }
   }
   return out
 }
 
 export function selfItemTreeTitle(node: SelfItemTreeRow): string {
   const it = node.item
-  if (node.fullGroupHeader) return '整单拆分'
   if (node.isSplitChild) {
     return (it.skuSpecs || it.productName || it.skuCode || '规格').trim() || '规格'
   }
-  return (it.productName || it.skuCode || '商品').trim() || '商品'
+  return (it.skuSpecs || it.productName || it.skuCode || '商品').trim() || '商品'
 }
 
 export function isSelfItemShippable(it: SelfOrderItem, all: SelfOrderItem[]): boolean {

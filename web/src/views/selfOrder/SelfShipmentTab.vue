@@ -230,12 +230,14 @@ function rebuildSoGroups() {
   soGroups.value = groups
 }
 
-/** 销售单分组下树形展示：父商品 + └ 拆分规格 */
+/** 销售单分组下树形展示：父商品 + └ 拆分规格（对齐供应链物流） */
 const soGroupRows = computed(() => {
   const rows: {
     key: string
     group: SalesOrderGroup
     line: LinePick
+    showSalesOrder: boolean
+    showCallbackBtn: boolean
     lineStatus: string
     isSplitChild: boolean
     isSplitParent: boolean
@@ -257,29 +259,73 @@ const soGroupRows = computed(() => {
       }
       roots.push(line)
     }
-    const pushLine = (line: LinePick, isChild: boolean, isParent: boolean, kids: LinePick[] = []) => {
+    const pushLine = (
+      line: LinePick,
+      opts: {
+        isChild: boolean
+        isParent: boolean
+        showSalesOrder: boolean
+        showCallbackBtn: boolean
+        kids?: LinePick[]
+      },
+    ) => {
+      const kids = opts.kids || []
+      const done = line.shippable
+        ? line.remaining <= 0
+        : (kids.length > 0 && kids.every((k) => k.remaining <= 0))
+      const partial = line.shippable
+        ? (line.shippedQty > 0 && line.remaining > 0)
+        : kids.some((k) => k.shippedQty > 0) && !kids.every((k) => k.remaining <= 0)
       let status = '待发货'
-      if (!line.shippable && kids.length) {
-        const done = kids.every((k) => k.remaining <= 0)
-        const partial = kids.some((k) => k.shippedQty > 0) && !done
-        status = done ? '已登记物流' : partial ? '部分发货' : '已拆分'
-      } else if (line.remaining <= 0) status = '已登记物流'
-      else if (line.shippedQty > 0) status = '部分发货'
+      if (!line.shippable && kids.length) status = done ? '已登记物流' : partial ? '部分发货' : '已拆分'
+      else if (done) status = '已登记物流'
+      else if (partial) status = '部分发货'
       rows.push({
         key: `${g.key}:${line.selfOrderItemId}`,
         group: g,
         line,
+        showSalesOrder: opts.showSalesOrder,
+        showCallbackBtn: opts.showCallbackBtn,
         lineStatus: status,
-        isSplitChild: isChild,
-        isSplitParent: isParent,
+        isSplitChild: opts.isChild,
+        isSplitParent: opts.isParent,
       })
     }
     for (const root of roots) {
       const kids = childrenByParent.get(root.selfOrderItemId) || []
-      pushLine(root, false, kids.length > 0, kids)
-      for (const ch of kids) pushLine(ch, true, false)
+      if (kids.length > 0) {
+        pushLine(root, {
+          isChild: false,
+          isParent: true,
+          showSalesOrder: true,
+          showCallbackBtn: true,
+          kids,
+        })
+        for (const ch of kids) {
+          pushLine(ch, {
+            isChild: true,
+            isParent: false,
+            showSalesOrder: false,
+            showCallbackBtn: false,
+          })
+        }
+      } else {
+        pushLine(root, {
+          isChild: false,
+          isParent: false,
+          showSalesOrder: true,
+          showCallbackBtn: true,
+        })
+      }
     }
-    for (const ch of fullChildren) pushLine(ch, true, false)
+    for (const ch of fullChildren) {
+      pushLine(ch, {
+        isChild: true,
+        isParent: false,
+        showSalesOrder: true,
+        showCallbackBtn: true,
+      })
+    }
   }
   return rows
 })
@@ -617,24 +663,25 @@ const activeGroup = computed(() =>
   <div v-loading="loading">
     <div v-if="!readonly" class="toolbar">
       <el-button type="primary" plain :loading="syncing" @click="handleSyncFromOrders()">同步物流</el-button>
-<span class="hint">拆分规格树形展示（对齐订单中心）；按可发规格分批发货，全部发出后为「已发货」，否则「部分发货」</span>
+      <span class="hint">拆分规格树形展示（对齐供应链中心）；按可发规格分批发货，全部发出后为「已发货」，否则「部分发货」</span>
     </div>
 
     <el-table :data="soGroupRows" border stripe class="so-group-table" row-key="key">
       <el-table-column label="销售单" width="160" show-overflow-tooltip>
         <template #default="{ row }">
-          <span v-if="row.isSplitChild" class="muted">└</span>
-          <span v-else>{{ row.group.refOrderNo }}</span>
+          <template v-if="row.showSalesOrder">
+            <span>{{ row.group.refOrderNo }}</span>
+          </template>
+          <span v-else class="muted">—</span>
         </template>
       </el-table-column>
       <el-table-column label="规格" min-width="240" show-overflow-tooltip>
         <template #default="{ row }">
           <div class="spec-cell" :class="{ child: row.isSplitChild }">
-            <span v-if="row.isSplitChild" class="tree-prefix">└</span>
-            <span v-if="row.isSplitChild">{{ formatSpecLabel(row.line.skuSpecs || row.line.productName, row.line.qty) }}</span>
-            <span v-else>{{ row.line.productName || formatSpecLabel(row.line.skuSpecs, row.line.qty) }}</span>
-            <el-tag v-if="row.isSplitParent" size="small" type="warning" effect="plain" class="split-tag">已拆分</el-tag>
-            <el-tag v-else-if="row.isSplitChild" size="small" type="info" effect="plain" class="split-tag">拆分</el-tag>
+            <span v-if="row.isSplitChild" class="tree-prefix">└ </span>
+            <span>{{ formatSpecLabel(row.line.skuSpecs || row.line.productName, row.line.qty) }}</span>
+            <el-tag v-if="row.isSplitChild" size="small" type="warning" class="split-tag">拆分</el-tag>
+            <el-tag v-else-if="row.isSplitParent" size="small" type="info" class="split-tag">已拆分</el-tag>
           </div>
         </template>
       </el-table-column>
@@ -665,7 +712,7 @@ const activeGroup = computed(() =>
             发货
           </el-button>
           <el-button
-            v-if="!row.isSplitChild"
+            v-if="row.showCallbackBtn"
             type="success"
             link
             :disabled="!row.group.refSoId"
@@ -950,12 +997,17 @@ const activeGroup = computed(() =>
   gap: 6px;
 }
 .spec-cell.child {
-  color: var(--el-text-color-regular);
+  padding-left: 8px;
+  color: #475569;
 }
 .tree-prefix {
-  color: var(--el-text-color-placeholder);
+  color: #8f959e;
+  margin-right: 2px;
+  flex-shrink: 0;
 }
 .split-tag {
   flex-shrink: 0;
+  margin-left: 2px;
+  vertical-align: middle;
 }
 </style>

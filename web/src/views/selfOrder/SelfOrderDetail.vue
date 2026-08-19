@@ -396,7 +396,7 @@ async function confirmBindSku(sku: WarehouseSku) {
             <el-table-column label="图片" width="72" align="center">
               <template #default="{ row }">
                 <el-image
-                  v-if="!row.fullGroupHeader && row.item.picUrl"
+                  v-if="row.item.picUrl"
                   :src="row.item.picUrl"
                   :preview-src-list="[row.item.picUrl]"
                   fit="cover"
@@ -408,7 +408,7 @@ async function confirmBindSku(sku: WarehouseSku) {
             </el-table-column>
             <el-table-column label="销售单" width="140" show-overflow-tooltip>
               <template #default="{ row }">
-                <span v-if="row.isSplitChild || row.fullGroupHeader" class="muted">└</span>
+                <span v-if="row.isSplitChild" class="muted">—</span>
                 <template v-else>
                   <span
                     v-if="row.item.refSoId"
@@ -421,17 +421,17 @@ async function confirmBindSku(sku: WarehouseSku) {
             </el-table-column>
             <el-table-column label="规格" min-width="240" show-overflow-tooltip>
               <template #default="{ row }">
-                <div class="spec-cell" :class="{ child: row.isSplitChild || row.fullGroupHeader }">
-                  <span v-if="row.isSplitChild" class="tree-prefix">└</span>
+                <div class="spec-cell" :class="{ child: row.isSplitChild }">
+                  <span v-if="row.isSplitChild" class="tree-prefix">└ </span>
                   <span>{{ selfItemTreeTitle(row) }}</span>
-                  <el-tag v-if="row.isSplitParent" size="small" type="warning" effect="plain" class="split-tag">已拆分</el-tag>
-                  <el-tag v-else-if="row.isSplitChild" size="small" type="info" effect="plain" class="split-tag">拆分</el-tag>
+                  <el-tag v-if="row.isSplitChild" size="small" type="warning" class="split-tag">拆分</el-tag>
+                  <el-tag v-else-if="row.isSplitParent" size="small" type="info" class="split-tag">已拆分</el-tag>
                 </div>
               </template>
             </el-table-column>
             <el-table-column label="库存 SKU" width="180">
               <template #default="{ row }">
-                <div v-if="!row.isSplitChild && !row.fullGroupHeader" class="inv-sku-cell">
+                <div v-if="!row.isSplitChild" class="inv-sku-cell">
                   <span v-if="row.item.invSkuCode">{{ row.item.invSkuCode }}</span>
                   <span v-else class="muted">未绑定</span>
                   <el-button
@@ -446,17 +446,18 @@ async function confirmBindSku(sku: WarehouseSku) {
               </template>
             </el-table-column>
             <el-table-column label="数量" width="70" align="center">
-              <template #default="{ row }">{{ row.fullGroupHeader ? '—' : row.item.qty }}</template>
+              <template #default="{ row }">{{ row.item.qty }}</template>
             </el-table-column>
             <el-table-column label="实付金额" width="100" align="right">
               <template #default="{ row }">
-                <span v-if="!row.isSplitChild && !row.fullGroupHeader && row.item.saleAmount > 0">¥{{ Number(row.item.saleAmount).toFixed(2) }}</span>
+                <span v-if="row.isSplitChild" class="muted">—</span>
+                <span v-else-if="row.item.saleAmount > 0">¥{{ Number(row.item.saleAmount).toFixed(2) }}</span>
                 <span v-else class="muted">—</span>
               </template>
             </el-table-column>
             <el-table-column label="成本单价" width="130" align="right">
               <template #default="{ row }">
-                <template v-if="!row.isSplitChild && !row.fullGroupHeader">
+                <template v-if="!row.isSplitChild">
                   <el-input-number
                     v-if="canEditCost"
                     :model-value="Number(row.item.costUnitPrice || 0)"
@@ -476,7 +477,7 @@ async function confirmBindSku(sku: WarehouseSku) {
             </el-table-column>
             <el-table-column label="成本小计" width="100" align="right">
               <template #default="{ row }">
-                <span v-if="!row.isSplitChild && !row.fullGroupHeader">¥{{ Number(row.item.costAmount || 0).toFixed(2) }}</span>
+                <span v-if="!row.isSplitChild">¥{{ Number(row.item.costAmount || 0).toFixed(2) }}</span>
                 <span v-else class="muted">—</span>
               </template>
             </el-table-column>
@@ -490,7 +491,7 @@ async function confirmBindSku(sku: WarehouseSku) {
               </template>
             </el-table-column>
             <el-table-column label="备注" min-width="120" show-overflow-tooltip>
-              <template #default="{ row }">{{ row.isSplitChild || row.fullGroupHeader ? '—' : (row.item.remark || '—') }}</template>
+              <template #default="{ row }">{{ row.isSplitChild ? '—' : (row.item.remark || '—') }}</template>
             </el-table-column>
           </el-table>
         </el-tab-pane>
@@ -626,10 +627,12 @@ async function confirmBindSku(sku: WarehouseSku) {
   gap: 6px;
 }
 .spec-cell.child {
-  color: var(--el-text-color-regular);
+  padding-left: 8px;
+  color: #475569;
 }
 .tree-prefix {
-  color: var(--el-text-color-placeholder);
+  color: #8f959e;
+  flex-shrink: 0;
 }
 .split-tag {
   flex-shrink: 0;
