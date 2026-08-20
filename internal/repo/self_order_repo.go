@@ -232,57 +232,128 @@ func (r *SelfOrderRepo) CountItems(selfOrderID uint64) (int64, error) {
 	return n, err
 }
 
-// ItemSpecsBySelfOrderIDs 批量汇总明细规格（空规格跳过），同规格累加数量，输出如「规格 x2」。
+// ItemSpecsBySelfOrderIDs 批量汇总明细规格。
+// 普通行：「规格」或「规格 x2」；拆分行：「主商品拆分为规格A；规格B」，整单拆分为「拆分为规格A；规格B」。
 func (r *SelfOrderRepo) ItemSpecsBySelfOrderIDs(ids []uint64) (map[uint64][]string, error) {
 	out := make(map[uint64][]string, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	type row struct {
-		SelfOrderID uint64 `gorm:"column:self_order_id"`
-		SkuSpecs    string `gorm:"column:sku_specs"`
-		Qty         int    `gorm:"column:qty"`
+		ID                    uint64 `gorm:"column:id"`
+		SelfOrderID           uint64 `gorm:"column:self_order_id"`
+		ProductName           string `gorm:"column:product_name"`
+		SkuSpecs              string `gorm:"column:sku_specs"`
+		Qty                   int    `gorm:"column:qty"`
+		ParentSelfOrderItemID uint64 `gorm:"column:parent_self_order_item_id"`
+		SplitKind             string `gorm:"column:split_kind"`
 	}
 	var rows []row
 	err := r.db.Model(&model.SelfOrderItem{}).
 		Scopes(scopeTenant(r.tenantID)).
-		Select("self_order_id, sku_specs, qty").
-		Where("self_order_id IN ? AND sku_specs <> ''", ids).
+		Select("id, self_order_id, product_name, sku_specs, qty, parent_self_order_item_id, split_kind").
+		Where("self_order_id IN ?", ids).
 		Order("self_order_id ASC, id ASC").
 		Find(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	order := make(map[uint64][]string, len(ids))
-	qtyBy := make(map[uint64]map[string]int, len(ids))
-	for _, row := range rows {
-		spec := strings.TrimSpace(row.SkuSpecs)
-		if spec == "" {
-			continue
-		}
-		q := row.Qty
-		if q <= 0 {
-			q = 1
-		}
-		if _, ok := qtyBy[row.SelfOrderID]; !ok {
-			qtyBy[row.SelfOrderID] = map[string]int{}
-		}
-		if _, ok := qtyBy[row.SelfOrderID][spec]; !ok {
-			order[row.SelfOrderID] = append(order[row.SelfOrderID], spec)
-		}
-		qtyBy[row.SelfOrderID][spec] += q
+
+	bySO := make(map[uint64][]row, len(ids))
+	for _, rw := range rows {
+		bySO[rw.SelfOrderID] = append(bySO[rw.SelfOrderID], rw)
 	}
-	for id, specs := range order {
-		lines := make([]string, 0, len(specs))
-		for _, spec := range specs {
-			q := qtyBy[id][spec]
-			if q > 1 {
-				lines = append(lines, fmt.Sprintf("%s x%d", spec, q))
-			} else {
-				lines = append(lines, spec)
+
+	formatLabel := func(name string, qty int) string {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return ""
+		}
+		if qty > 1 {
+			return fmt.Sprintf("%s x%d", name, qty)
+		}
+		return name
+	}
+	itemLabel := func(rw row) string {
+		if s := strings.TrimSpace(rw.SkuSpecs); s != "" {
+			return s
+		}
+		return strings.TrimSpace(rw.ProductName)
+	}
+	joinChildLabels := func(kids []row) string {
+		parts := make([]string, 0, len(kids))
+		seen := map[string]int{}
+		order := make([]string, 0, len(kids))
+		for _, ch := range kids {
+			name := itemLabel(ch)
+			if name == "" {
+				continue
+			}
+			q := ch.Qty
+			if q <= 0 {
+				q = 1
+			}
+			if _, ok := seen[name]; !ok {
+				order = append(order, name)
+			}
+			seen[name] += q
+		}
+		for _, name := range order {
+			parts = append(parts, formatLabel(name, seen[name]))
+		}
+		return strings.Join(parts, "；")
+	}
+
+	for soID, list := range bySO {
+		childrenByParent := map[uint64][]row{}
+		var fullKids []row
+		var roots []row
+		for _, rw := range list {
+			kind := strings.TrimSpace(rw.SplitKind)
+			if kind == "full" {
+				fullKids = append(fullKids, rw)
+				continue
+			}
+			if kind == "partial" && rw.ParentSelfOrderItemID > 0 {
+				childrenByParent[rw.ParentSelfOrderItemID] = append(childrenByParent[rw.ParentSelfOrderItemID], rw)
+				continue
+			}
+			roots = append(roots, rw)
+		}
+
+		lines := make([]string, 0, len(roots)+1)
+		for _, root := range roots {
+			kids := childrenByParent[root.ID]
+			parentName := itemLabel(root)
+			if parentName == "" {
+				parentName = "商品"
+			}
+			if len(kids) > 0 {
+				childText := joinChildLabels(kids)
+				if childText == "" {
+					lines = append(lines, parentName+"已拆分")
+				} else {
+					lines = append(lines, parentName+"拆分为"+childText)
+				}
+				continue
+			}
+			q := root.Qty
+			if q <= 0 {
+				q = 1
+			}
+			if label := formatLabel(parentName, q); label != "" {
+				lines = append(lines, label)
 			}
 		}
-		out[id] = lines
+		if len(fullKids) > 0 {
+			childText := joinChildLabels(fullKids)
+			if childText != "" {
+				lines = append(lines, "拆分为"+childText)
+			}
+		}
+		if len(lines) > 0 {
+			out[soID] = lines
+		}
 	}
 	return out, nil
 }
