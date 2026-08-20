@@ -552,7 +552,7 @@ onUnmounted(() => stopIntentListen())
       :default-sort="{ prop: 'createdAt', order: 'descending' }"
       @row-click="openDetail"
     >
-      <el-table-column prop="soNo" label="自营单号" min-width="130" show-overflow-tooltip />
+      <el-table-column prop="soNo" label="自营单号" min-width="168" width="168" show-overflow-tooltip class-name="col-nowrap" />
       <el-table-column label="订单类型" width="80" align="center">
         <template #default="{ row }">{{ labelSource(row.sourceChannel) }}</template>
       </el-table-column>
