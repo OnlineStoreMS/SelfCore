@@ -24,6 +24,11 @@ import {
 } from '../../utils/orderCopy'
 import { dateShortcuts, dateRangeDefaultTime, last7DaysDateTimeRange, todayDateTimeRange } from '../../utils/date'
 import { onDistOrderListIntent, takeDistOrderListIntent } from '../../utils/distOrderListIntent'
+import {
+  loadDistOrderListFilters,
+  saveDistOrderListFilters,
+  type DistOrderListFilterSnapshot,
+} from '../../utils/distOrderListFilters'
 
 const route = useRoute()
 const router = useRouter()
@@ -81,19 +86,33 @@ function listPathForType(ft: string) {
 
 const activeTab = computed(() => fulfillmentType.value || 'all')
 
-/** 用户手动切 Tab 时重置状态类筛选；勿用 computed setter，避免挂载时冲掉工作台意图 */
+/** 用户手动切 Tab：先落盘当前筛选，再恢复目标 Tab 记忆 */
 function onTypeTabChange(name: string | number) {
   const ft = String(name) === 'all' ? '' : String(name)
+  persistFilters()
   fulfillmentType.value = ft
   page.value = 1
   selected.value = []
-  status.value = ''
-  statusesFilter.value = ''
-  payStatusFilter.value = ''
-  excludeStatusesFilter.value = ''
+  const saved = loadDistOrderListFilters(ft || 'all')
+  if (saved) {
+    applyFilterSnapshot(saved)
+  } else {
+    status.value = ''
+    statusesFilter.value = ''
+    payStatusFilter.value = ''
+    excludeStatusesFilter.value = ''
+    distributorId.value = undefined
+    keyword.value = ''
+    refSoId.value = undefined
+    createdRange.value = null
+    orderedRange.value = last7DaysDateTimeRange()
+    sortBy.value = 'orderedAt'
+    sortOrder.value = 'desc'
+  }
   const target = listPathForType(ft)
   if (route.path !== target) {
     void router.replace(target)
+    persistFilters()
     return
   }
   void loadData()
@@ -134,17 +153,69 @@ function resolveFulfillmentFromRoute(): string {
   return ''
 }
 
-/** 从路径 / meta / 进入意图初始化筛选；不把筛选写回地址栏 */
+function filterSnapshot(): DistOrderListFilterSnapshot {
+  return {
+    status: status.value,
+    statusesFilter: statusesFilter.value,
+    payStatusFilter: payStatusFilter.value,
+    excludeStatusesFilter: excludeStatusesFilter.value,
+    distributorId: distributorId.value,
+    keyword: keyword.value,
+    refSoId: refSoId.value,
+    createdRange: createdRange.value,
+    orderedRange: orderedRange.value,
+    page: page.value,
+    pageSize: pageSize.value,
+    sortBy: sortBy.value,
+    sortOrder: sortOrder.value,
+  }
+}
+
+function persistFilters() {
+  saveDistOrderListFilters(fulfillmentType.value || 'all', filterSnapshot())
+}
+
+function applyFilterSnapshot(s: DistOrderListFilterSnapshot) {
+  status.value = s.status || ''
+  statusesFilter.value = s.statusesFilter || ''
+  payStatusFilter.value = s.payStatusFilter || ''
+  excludeStatusesFilter.value = s.excludeStatusesFilter || ''
+  distributorId.value = s.distributorId
+  keyword.value = s.keyword || ''
+  refSoId.value = s.refSoId
+  createdRange.value = s.createdRange ?? null
+  orderedRange.value = s.orderedRange ?? null
+  page.value = s.page > 0 ? s.page : 1
+  pageSize.value = s.pageSize > 0 ? s.pageSize : 20
+  sortBy.value = s.sortBy || 'orderedAt'
+  sortOrder.value = s.sortOrder === 'asc' ? 'asc' : 'desc'
+}
+
+function resetFilterFields() {
+  status.value = ''
+  statusesFilter.value = ''
+  payStatusFilter.value = ''
+  excludeStatusesFilter.value = ''
+  distributorId.value = undefined
+  keyword.value = ''
+  refSoId.value = undefined
+  createdRange.value = null
+  orderedRange.value = last7DaysDateTimeRange()
+  page.value = 1
+  sortBy.value = 'orderedAt'
+  sortOrder.value = 'desc'
+}
+
+/** 从路径 / meta / 进入意图初始化筛选；无意图则恢复记忆 */
 function applyRouteContext() {
   fulfillmentType.value = resolveFulfillmentFromRoute()
 
   const intent = takeDistOrderListIntent()
-  if (intent) {
-    status.value = ''
-    statusesFilter.value = ''
-    payStatusFilter.value = ''
-    excludeStatusesFilter.value = ''
+  const q = route.query
+  const hasQuery = !!(q.refSoId || q.status || q.fulfillmentType)
 
+  if (intent) {
+    resetFilterFields()
     if (intent.fulfillmentType) {
       fulfillmentType.value = intent.fulfillmentType
     }
@@ -177,26 +248,27 @@ function applyRouteContext() {
       refSoId.value = intent.refSoId
       createdRange.value = null
       orderedRange.value = null
-    } else if (!(route.query.refSoId)) {
-      refSoId.value = undefined
     }
-  } else if (!(route.query.refSoId)) {
-    refSoId.value = undefined
+    persistFilters()
+  } else if (hasQuery) {
+    resetFilterFields()
+    if (q.refSoId) {
+      refSoId.value = Number(q.refSoId)
+      createdRange.value = null
+      orderedRange.value = null
+    }
+    if (typeof q.status === 'string' && q.status) {
+      status.value = q.status
+    }
+    if (typeof q.fulfillmentType === 'string' && q.fulfillmentType && !fulfillmentType.value) {
+      fulfillmentType.value = q.fulfillmentType
+    }
+    persistFilters()
+  } else {
+    const saved = loadDistOrderListFilters(fulfillmentType.value || 'all')
+    if (saved) applyFilterSnapshot(saved)
   }
 
-  // 兼容旧链接 ?refSoId= / ?status= / ?fulfillmentType= ，读完即清掉
-  const q = route.query
-  if (q.refSoId) {
-    refSoId.value = Number(q.refSoId)
-    createdRange.value = null
-    orderedRange.value = null
-  }
-  if (typeof q.status === 'string' && q.status) {
-    status.value = q.status
-  }
-  if (typeof q.fulfillmentType === 'string' && q.fulfillmentType && !fulfillmentType.value) {
-    fulfillmentType.value = q.fulfillmentType
-  }
   if (Object.keys(q).length > 0) {
     void router.replace({ path: listPathForType(fulfillmentType.value), query: {} })
   }
@@ -235,6 +307,7 @@ async function loadData() {
     tableData.value = data.list
     total.value = data.total
     selected.value = []
+    persistFilters()
   } catch (e) {
     ElMessage.error((e as Error).message || '加载失败')
   } finally {
@@ -261,7 +334,6 @@ watch(
     if (!route.path.startsWith('/dist-orders')) return
     if (route.path.includes('/create') || /\/\d+/.test(route.path)) return
     applyRouteContext()
-    page.value = 1
     void loadData()
   },
 )
@@ -411,6 +483,7 @@ async function handleCopy(row: DistOrderListItem) {
 }
 
 function openDetail(row: DistOrderListItem) {
+  persistFilters()
   router.push(`/dist-orders/${row.id}`)
 }
 

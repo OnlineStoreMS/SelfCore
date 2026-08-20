@@ -26,6 +26,12 @@ import {
   isMaskedReceiver,
 } from '../../utils/orderCopy'
 import { onSelfOrderListIntent, takeSelfOrderListIntent } from '../../utils/selfOrderListIntent'
+import {
+  loadSelfOrderListFilters,
+  saveSelfOrderListFilters,
+  clearSelfOrderListFilters,
+  type SelfOrderListFilterSnapshot,
+} from '../../utils/selfOrderListFilters'
 
 const router = useRouter()
 const loading = ref(false)
@@ -179,12 +185,49 @@ async function handleDelete(row: SelfOrderListItem) {
 }
 
 function openDetail(row: SelfOrderListItem) {
+  persistFilters()
   router.push(`/self-orders/${row.id}`)
 }
 
+function filterSnapshot(): SelfOrderListFilterSnapshot {
+  return {
+    status: filters.status,
+    statusesFilter: statusesFilter.value,
+    payStatusesFilter: payStatusesFilter.value,
+    excludeStatusesFilter: excludeStatusesFilter.value,
+    shipStatus: filters.shipStatus,
+    payStatus: filters.payStatus,
+    keyword: filters.keyword,
+    createdRange: filters.createdRange,
+    orderedRange: filters.orderedRange,
+    page: filters.page,
+    pageSize: filters.pageSize,
+  }
+}
+
+function persistFilters() {
+  saveSelfOrderListFilters(filterSnapshot())
+}
+
+function applyFilterSnapshot(s: SelfOrderListFilterSnapshot) {
+  filters.status = s.status || ''
+  statusFilter.value = s.status || ''
+  statusesFilter.value = s.statusesFilter || ''
+  payStatusesFilter.value = s.payStatusesFilter || ''
+  excludeStatusesFilter.value = s.excludeStatusesFilter || ''
+  filters.shipStatus = s.shipStatus || ''
+  filters.payStatus = s.payStatus || ''
+  filters.keyword = s.keyword || ''
+  filters.createdRange = s.createdRange ?? null
+  filters.orderedRange = s.orderedRange ?? null
+  filters.page = s.page > 0 ? s.page : 1
+  filters.pageSize = s.pageSize > 0 ? s.pageSize : 20
+}
+
+/** 工作台意图优先覆盖记忆；否则恢复上次筛选 */
 function applyListIntent() {
   const intent = takeSelfOrderListIntent()
-  if (!intent) return
+  if (!intent) return false
   statusFilter.value = ''
   statusesFilter.value = ''
   payStatusesFilter.value = ''
@@ -223,6 +266,14 @@ function applyListIntent() {
     filters.createdRange = todayDateTimeRange()
   }
   filters.page = 1
+  persistFilters()
+  return true
+}
+
+function initListState() {
+  if (applyListIntent()) return
+  const saved = loadSelfOrderListFilters()
+  if (saved) applyFilterSnapshot(saved)
 }
 
 async function load() {
@@ -249,6 +300,7 @@ async function load() {
     const data = await listSelfOrders(params as Parameters<typeof listSelfOrders>[0])
     list.value = data.list || []
     total.value = data.total || 0
+    persistFilters()
   } catch (e) {
     ElMessage.error((e as Error).message || '加载失败')
   } finally {
@@ -283,6 +335,8 @@ function resetFilters() {
   excludeStatusesFilter.value = ''
   filters.createdRange = last7DaysDateTimeRange()
   filters.orderedRange = null
+  filters.page = 1
+  clearSelfOrderListFilters()
   onFilterChange()
 }
 
@@ -373,7 +427,7 @@ const intentTags = computed(() => {
 })
 
 onMounted(() => {
-  applyListIntent()
+  initListState()
   void load()
 })
 
