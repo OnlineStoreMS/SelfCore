@@ -501,7 +501,7 @@ func (h *SelfOrderHandler) CancelByRefSo(c *gin.Context) {
 	if reason == "" {
 		reason = "撤回分配"
 	}
-	list, err := h.ps(c).CancelByRefSoID(in.RefSoID, reason)
+	list, err := h.ps(c).CancelByRefSoIDOpt(in.RefSoID, reason, in.Force)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, err.Error())
 		return

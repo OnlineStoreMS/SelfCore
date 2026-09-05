@@ -154,6 +154,8 @@ type SelfShipInput struct {
 type SelfCancelByRefInput struct {
 	RefSoID uint64 `json:"refSoId" binding:"required"`
 	Reason  string `json:"reason"`
+	// Force 关单/退款：跳过已发货/部分发货/已完成，只取消其余；false 为撤回分配（遇已发货报错）
+	Force bool `json:"force"`
 }
 
 type SelfDeleteByRefInput struct {

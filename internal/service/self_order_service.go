@@ -1788,6 +1788,10 @@ func (s *SelfOrderService) Cancel(id uint64) (*dto.SelfOrderDetail, error) {
 
 // CancelWithReason 取消自营单（撤回分配等）；已取消幂等成功。
 func (s *SelfOrderService) CancelWithReason(id uint64, reason string) (*dto.SelfOrderDetail, error) {
+	return s.cancelWithReason(id, reason, false)
+}
+
+func (s *SelfOrderService) cancelWithReason(id uint64, reason string, force bool) (*dto.SelfOrderDetail, error) {
 	r := s.repos.SelfOrder.ForTenant(s.tenantID)
 	o, err := r.GetByID(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1799,9 +1803,9 @@ func (s *SelfOrderService) CancelWithReason(id uint64, reason string) (*dto.Self
 	if o.Status == model.SelfOrderStatusCancelled {
 		return s.Get(o.ID)
 	}
-	if o.Status == model.SelfOrderStatusShipped ||
+	if !force && (o.Status == model.SelfOrderStatusShipped ||
 		o.Status == model.SelfOrderStatusCompleted ||
-		o.Status == model.SelfOrderStatusPartialShipped {
+		o.Status == model.SelfOrderStatusPartialShipped) {
 		return nil, fmt.Errorf("已发货单据不能取消")
 	}
 	o.Status = model.SelfOrderStatusCancelled
@@ -1822,6 +1826,13 @@ func (s *SelfOrderService) CancelWithReason(id uint64, reason string) (*dto.Self
 
 // CancelByRefSoID 按销售单取消关联自营单（订单中心撤回分配）。
 func (s *SelfOrderService) CancelByRefSoID(refSoID uint64, reason string) ([]dto.SelfOrderDetail, error) {
+	return s.CancelByRefSoIDOpt(refSoID, reason, false)
+}
+
+// CancelByRefSoIDOpt 按销售单取消。
+// force=true（关单/退款）：跳过已发货、部分发货、已完成，仅取消其余单据。
+// force=false（撤回分配）：遇已发货等不可取消状态返回错误。
+func (s *SelfOrderService) CancelByRefSoIDOpt(refSoID uint64, reason string, force bool) ([]dto.SelfOrderDetail, error) {
 	if refSoID == 0 {
 		return nil, fmt.Errorf("refSoId 无效")
 	}
@@ -1839,7 +1850,29 @@ func (s *SelfOrderService) CancelByRefSoID(refSoID uint64, reason string) ([]dto
 		if o.Status == model.SelfOrderStatusCancelled {
 			continue
 		}
-		d, err := s.CancelWithReason(o.ID, reason)
+		if o.Status == model.SelfOrderStatusShipped ||
+			o.Status == model.SelfOrderStatusCompleted ||
+			o.Status == model.SelfOrderStatusPartialShipped {
+			if force {
+				// 关单/退款：不自动取消，备注待人工处理
+				tag := "退款完成，需人工处理"
+				if !strings.Contains(o.Remark, "退款完成，需人工处理") {
+					if o.Remark == "" {
+						o.Remark = tag
+					} else {
+						o.Remark = tag + " " + o.Remark
+					}
+					if err := r.Save(&o); err != nil {
+						return out, err
+					}
+				}
+				if d, err := s.Get(o.ID); err == nil && d != nil {
+					out = append(out, *d)
+				}
+				continue
+			}
+		}
+		d, err := s.cancelWithReason(o.ID, reason, false)
 		if err != nil {
 			return out, err
 		}
