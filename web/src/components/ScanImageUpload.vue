@@ -51,12 +51,23 @@ function stopPoll() {
 }
 
 function addUrl(url: string) {
-  if (!url || urls.value.includes(url)) return
-  if (urls.value.length >= props.max) {
-    ElMessage.warning(`最多上传 ${props.max} 张`)
-    return
+  addUrls([url])
+}
+
+function addUrls(list: string[]) {
+  if (!list.length) return
+  const next = [...urls.value]
+  let added = 0
+  for (const url of list) {
+    if (!url || next.includes(url)) continue
+    if (next.length >= props.max) {
+      if (added === 0) ElMessage.warning(`最多上传 ${props.max} 张`)
+      break
+    }
+    next.push(url)
+    added++
   }
-  urls.value = [...urls.value, url]
+  if (added > 0) urls.value = next
 }
 
 function removeAt(idx: number) {
@@ -107,8 +118,10 @@ async function openScan() {
       try {
         const s = await getPhotoUploadSession(scanToken.value)
         const items = s.items?.length ? s.items : s.url ? [{ url: s.url }] : []
-        for (let i = seen; i < items.length; i++) addUrl(items[i].url)
-        if (items.length > seen) seen = items.length
+        if (items.length > seen) {
+          addUrls(items.slice(seen).map((it) => it.url))
+          seen = items.length
+        }
         if (s.status === 'done' && items.length) {
           scanStatus.value = 'done'
           stopPoll()
