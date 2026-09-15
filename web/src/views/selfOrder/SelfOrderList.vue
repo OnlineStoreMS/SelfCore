@@ -441,7 +441,7 @@ onUnmounted(() => stopIntentListen())
 <template>
   <div class="page">
     <div class="head">
-      <h2 class="page-title">自营订单</h2>
+    <h2 class="page-title">自营订单</h2>
     </div>
     <p class="desc">
       本地自营履约单据，承接订单中心「自营发货」分配；发货、扣库与物流回传在此处理。
