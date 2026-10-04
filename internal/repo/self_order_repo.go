@@ -405,47 +405,39 @@ func (r *SelfOrderRepo) GetItem(id uint64) (*model.SelfOrderItem, error) {
 }
 
 func (r *SelfOrderRepo) NextSoNo() (string, error) {
-	prefix := "SO" + time.Now().Format("20060102")
-	var last string
-	err := r.db.Model(&model.SelfOrder{}).
-		Scopes(scopeTenant(r.tenantID)).
-		Where("so_no LIKE ?", prefix+"%").
-		Order("so_no DESC").
-		Limit(1).
-		Pluck("so_no", &last).Error
-	if err != nil {
-		return "", err
-	}
-	seq := 1
-	if last != "" && len(last) > len(prefix) {
-		var n int
-		if _, scanErr := fmt.Sscanf(last[len(prefix):], "%d", &n); scanErr == nil && n >= 0 {
-			seq = n + 1
+	prefix := dailyPrefix("SO")
+	for attempt := 0; attempt < 20; attempt++ {
+		no, err := nextDailyDocNo(r.db, &model.SelfOrder{}, "so_no", prefix)
+		if err != nil {
+			return "", err
+		}
+		var n int64
+		if err := r.db.Model(&model.SelfOrder{}).Where("so_no = ?", no).Count(&n).Error; err != nil {
+			return "", err
+		}
+		if n == 0 {
+			return no, nil
 		}
 	}
-	return fmt.Sprintf("%s%04d", prefix, seq), nil
+	return "", fmt.Errorf("自营单号冲突")
 }
 
 func (r *SelfOrderRepo) NextShipmentNo() (string, error) {
-	prefix := "SS" + time.Now().Format("20060102")
-	var last string
-	err := r.db.Model(&model.SelfShipment{}).
-		Scopes(scopeTenant(r.tenantID)).
-		Where("shipment_no LIKE ?", prefix+"%").
-		Order("shipment_no DESC").
-		Limit(1).
-		Pluck("shipment_no", &last).Error
-	if err != nil {
-		return "", err
-	}
-	seq := 1
-	if last != "" && len(last) > len(prefix) {
-		var n int
-		if _, scanErr := fmt.Sscanf(last[len(prefix):], "%d", &n); scanErr == nil && n >= 0 {
-			seq = n + 1
+	prefix := dailyPrefix("SS")
+	for attempt := 0; attempt < 20; attempt++ {
+		no, err := nextDailyDocNo(r.db, &model.SelfShipment{}, "shipment_no", prefix)
+		if err != nil {
+			return "", err
+		}
+		var n int64
+		if err := r.db.Model(&model.SelfShipment{}).Where("shipment_no = ?", no).Count(&n).Error; err != nil {
+			return "", err
+		}
+		if n == 0 {
+			return no, nil
 		}
 	}
-	return fmt.Sprintf("%s%04d", prefix, seq), nil
+	return "", fmt.Errorf("自营运单号冲突")
 }
 
 func (r *SelfOrderRepo) CreateShipment(sh *model.SelfShipment, items []model.SelfShipmentItem) error {
