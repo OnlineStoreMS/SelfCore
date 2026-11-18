@@ -22,116 +22,118 @@ type SelfOrderItemInput struct {
 
 // SelfOrderInput OrderCore / 管理端创建自营单。
 type SelfOrderInput struct {
-	WarehouseID   uint64               `json:"warehouseId"`
-	RefSoID       uint64               `json:"refSoId"`
-	RefTraceID    string               `json:"refTraceId"`
-	SaleAmount    float64              `json:"saleAmount"`
-	BuyerName     string               `json:"buyerName"`
-	BuyerPhone    string               `json:"buyerPhone"`
-	Address       string               `json:"address"`
-	Remark        string               `json:"remark"`
-	SourceChannel string               `json:"sourceChannel"`
-	Platform      string               `json:"platform"`
-	ShopName      string               `json:"shopName"`
-	// ManualSourceName 手工单订单来源名称
-	ManualSourceName string               `json:"manualSourceName"`
-	BuyerRemark   string               `json:"buyerRemark"`
-	SellerRemark  string               `json:"sellerRemark"`
-	FenFaRemark   string               `json:"fenFaRemark"`
-	PrinterRemark string               `json:"printerRemark"`
-	OrderedAt     string               `json:"orderedAt"`
-	// CreatedAt 可选：创建自营单时间；OrderCore 分配时传入 allocatedAt，历史回填同理
-	CreatedAt string `json:"createdAt,omitempty"`
-	// PayStatus 可选：paid 时创建即为已付款（电商订单由 OrderCore 传入）
-	PayStatus string `json:"payStatus"`
-	PaidAt    string `json:"paidAt"`
-	Items     []SelfOrderItemInput `json:"items"`
-}
-
-type SelfOrderListItem struct {
-	ID            uint64  `json:"id"`
-	SoNo          string  `json:"soNo"`
-	Status        string  `json:"status"`
 	WarehouseID   uint64  `json:"warehouseId"`
 	RefSoID       uint64  `json:"refSoId"`
 	RefTraceID    string  `json:"refTraceId"`
 	SaleAmount    float64 `json:"saleAmount"`
-	CostAmount    float64 `json:"costAmount"`
-	PayStatus     string  `json:"payStatus"`
-	PaidAt        string  `json:"paidAt,omitempty"`
 	BuyerName     string  `json:"buyerName"`
 	BuyerPhone    string  `json:"buyerPhone"`
+	Address       string  `json:"address"`
+	Remark        string  `json:"remark"`
 	SourceChannel string  `json:"sourceChannel"`
 	Platform      string  `json:"platform"`
 	ShopName      string  `json:"shopName"`
+	// ManualSourceName 手工单订单来源名称
 	ManualSourceName string `json:"manualSourceName"`
-	BuyerRemark   string  `json:"buyerRemark"`
-	SellerRemark  string  `json:"sellerRemark"`
-	FenFaRemark   string  `json:"fenFaRemark"`
-	PrinterRemark string  `json:"printerRemark"`
-	SkuSpecs      string  `json:"skuSpecs"` // 明细规格汇总
-	ItemCount     int     `json:"itemCount"`
-	StockDeducted bool    `json:"stockDeducted"`
-	StockError    string  `json:"stockError"`
-	OrderedAt     string  `json:"orderedAt,omitempty"`
-	ShippedAt     string  `json:"shippedAt,omitempty"`
-	CreatedAt     string  `json:"createdAt"`
+	BuyerRemark      string `json:"buyerRemark"`
+	SellerRemark     string `json:"sellerRemark"`
+	FenFaRemark      string `json:"fenFaRemark"`
+	PrinterRemark    string `json:"printerRemark"`
+	OrderedAt        string `json:"orderedAt"`
+	// CreatedAt 可选：创建自营单时间；OrderCore 分配时传入 allocatedAt，历史回填同理
+	CreatedAt string `json:"createdAt,omitempty"`
+	// PayStatus 可选：paid 时创建即为已付款（电商订单由 OrderCore 传入）
+	PayStatus string               `json:"payStatus"`
+	PaidAt    string               `json:"paidAt"`
+	Items     []SelfOrderItemInput `json:"items"`
+}
+
+type SelfOrderListItem struct {
+	ID               uint64  `json:"id"`
+	SoNo             string  `json:"soNo"`
+	Status           string  `json:"status"`
+	WarehouseID      uint64  `json:"warehouseId"`
+	RefSoID          uint64  `json:"refSoId"`
+	RefTraceID       string  `json:"refTraceId"`
+	SaleAmount       float64 `json:"saleAmount"`
+	CostAmount       float64 `json:"costAmount"`
+	PayStatus        string  `json:"payStatus"`
+	PaidAt           string  `json:"paidAt,omitempty"`
+	BuyerName        string  `json:"buyerName"`
+	BuyerPhone       string  `json:"buyerPhone"`
+	SourceChannel    string  `json:"sourceChannel"`
+	Platform         string  `json:"platform"`
+	ShopName         string  `json:"shopName"`
+	ManualSourceName string  `json:"manualSourceName"`
+	BuyerRemark      string  `json:"buyerRemark"`
+	SellerRemark     string  `json:"sellerRemark"`
+	FenFaRemark      string  `json:"fenFaRemark"`
+	PrinterRemark    string  `json:"printerRemark"`
+	SkuSpecs         string  `json:"skuSpecs"` // 明细规格汇总
+	ItemCount        int     `json:"itemCount"`
+	StockDeducted    bool    `json:"stockDeducted"`
+	StockError       string  `json:"stockError"`
+	OrderedAt        string  `json:"orderedAt,omitempty"`
+	ShippedAt        string  `json:"shippedAt,omitempty"`
+	CreatedAt        string  `json:"createdAt"`
 }
 
 type SelfOrderItemDTO struct {
-	ID             uint64  `json:"id"`
-	PimSkuID       uint64  `json:"pimSkuId"`
-	SkuCode        string  `json:"skuCode"`
-	ProductName    string  `json:"productName"`
-	SkuSpecs       string  `json:"skuSpecs"`
-	PicURL         string  `json:"picUrl"`
-	Qty            int     `json:"qty"`
-	SaleUnitPrice  float64 `json:"saleUnitPrice"`
-	SaleAmount     float64 `json:"saleAmount"`
-	InvSkuID       uint64  `json:"invSkuId"`
-	InvSkuCode     string  `json:"invSkuCode"`
-	CostUnitPrice  float64 `json:"costUnitPrice"`
-	CostAmount     float64 `json:"costAmount"`
-	RefSoID        uint64  `json:"refSoId"`
-	RefOrderItemID uint64  `json:"refOrderItemId"`
-	RefOrderNo     string  `json:"refOrderNo"`
-	ParentSelfOrderItemID uint64 `json:"parentSelfOrderItemId,omitempty"`
-	SplitKind             string `json:"splitKind,omitempty"`
-	ShipPlanLineID        uint64 `json:"shipPlanLineId,omitempty"`
-	Remark         string  `json:"remark"`
+	ID                    uint64  `json:"id"`
+	PimSkuID              uint64  `json:"pimSkuId"`
+	SkuCode               string  `json:"skuCode"`
+	ProductName           string  `json:"productName"`
+	SkuSpecs              string  `json:"skuSpecs"`
+	PicURL                string  `json:"picUrl"`
+	Qty                   int     `json:"qty"`
+	SaleUnitPrice         float64 `json:"saleUnitPrice"`
+	SaleAmount            float64 `json:"saleAmount"`
+	InvSkuID              uint64  `json:"invSkuId"`
+	InvSkuCode            string  `json:"invSkuCode"`
+	CostUnitPrice         float64 `json:"costUnitPrice"`
+	CostAmount            float64 `json:"costAmount"`
+	RefSoID               uint64  `json:"refSoId"`
+	RefOrderItemID        uint64  `json:"refOrderItemId"`
+	RefOrderNo            string  `json:"refOrderNo"`
+	ParentSelfOrderItemID uint64  `json:"parentSelfOrderItemId,omitempty"`
+	SplitKind             string  `json:"splitKind,omitempty"`
+	ShipPlanLineID        uint64  `json:"shipPlanLineId,omitempty"`
+	Remark                string  `json:"remark"`
 }
 
 type SelfOrderDetail struct {
-	ID            uint64             `json:"id"`
-	SoNo          string             `json:"soNo"`
-	Status        string             `json:"status"`
-	WarehouseID   uint64             `json:"warehouseId"`
-	RefSoID       uint64             `json:"refSoId"`
-	RefTraceID    string             `json:"refTraceId"`
-	SaleAmount    float64            `json:"saleAmount"`
-	CostAmount    float64            `json:"costAmount"`
-	PayStatus     string             `json:"payStatus"`
-	PaidAt        string             `json:"paidAt,omitempty"`
-	BuyerName     string             `json:"buyerName"`
-	BuyerPhone    string             `json:"buyerPhone"`
-	Address       string             `json:"address"`
-	Remark        string             `json:"remark"`
-	SourceChannel string             `json:"sourceChannel"`
-	Platform      string             `json:"platform"`
-	ShopName      string             `json:"shopName"`
-	ManualSourceName string          `json:"manualSourceName"`
-	BuyerRemark   string             `json:"buyerRemark"`
-	SellerRemark  string             `json:"sellerRemark"`
-	FenFaRemark   string             `json:"fenFaRemark"`
-	PrinterRemark string             `json:"printerRemark"`
-	StockDeducted bool               `json:"stockDeducted"`
-	StockError    string             `json:"stockError"`
-	OrderedAt     string             `json:"orderedAt,omitempty"`
-	ShippedAt     string             `json:"shippedAt,omitempty"`
-	CompletedAt   string             `json:"completedAt,omitempty"`
-	CreatedAt     string             `json:"createdAt"`
-	UpdatedAt     string             `json:"updatedAt"`
-	Items         []SelfOrderItemDTO `json:"items"`
+	ID               uint64             `json:"id"`
+	SoNo             string             `json:"soNo"`
+	Status           string             `json:"status"`
+	WarehouseID      uint64             `json:"warehouseId"`
+	RefSoID          uint64             `json:"refSoId"`
+	RefTraceID       string             `json:"refTraceId"`
+	SaleAmount       float64            `json:"saleAmount"`
+	CostAmount       float64            `json:"costAmount"`
+	PayStatus        string             `json:"payStatus"`
+	PaidAt           string             `json:"paidAt,omitempty"`
+	BuyerName        string             `json:"buyerName"`
+	BuyerPhone       string             `json:"buyerPhone"`
+	Address          string             `json:"address"`
+	Remark           string             `json:"remark"`
+	SourceChannel    string             `json:"sourceChannel"`
+	Platform         string             `json:"platform"`
+	ShopName         string             `json:"shopName"`
+	ManualSourceName string             `json:"manualSourceName"`
+	BuyerRemark      string             `json:"buyerRemark"`
+	SellerRemark     string             `json:"sellerRemark"`
+	FenFaRemark      string             `json:"fenFaRemark"`
+	PrinterRemark    string             `json:"printerRemark"`
+	StockDeducted    bool               `json:"stockDeducted"`
+	StockError       string             `json:"stockError"`
+	PickDocNo        string             `json:"pickDocNo,omitempty"`
+	PickStatus       string             `json:"pickStatus,omitempty"`
+	OrderedAt        string             `json:"orderedAt,omitempty"`
+	ShippedAt        string             `json:"shippedAt,omitempty"`
+	CompletedAt      string             `json:"completedAt,omitempty"`
+	CreatedAt        string             `json:"createdAt"`
+	UpdatedAt        string             `json:"updatedAt"`
+	Items            []SelfOrderItemDTO `json:"items"`
 }
 
 type BindInvSkuInput struct {
@@ -164,9 +166,9 @@ type SelfDeleteByRefInput struct {
 
 // SyncSplitItemsByRefSoInput 订单中心拆分计划同步到关联自营单。
 type SyncSplitItemsByRefSoInput struct {
-	RefSoID uint64                 `json:"refSoId" binding:"required"`
-	Mode    string                 `json:"mode"`
-	Lines   []SyncSplitItemLineIn  `json:"lines"`
+	RefSoID uint64                `json:"refSoId" binding:"required"`
+	Mode    string                `json:"mode"`
+	Lines   []SyncSplitItemLineIn `json:"lines"`
 }
 
 type SyncSplitItemLineIn struct {
@@ -187,7 +189,6 @@ type SyncSplitItemsByRefSoResult struct {
 type SelfCancelInput struct {
 	Reason string `json:"reason"`
 }
-
 
 type SelfShipmentItemInput struct {
 	SelfOrderItemID uint64 `json:"selfOrderItemId" binding:"required"`

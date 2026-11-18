@@ -74,6 +74,8 @@ export interface SelfOrderDetail {
   printerRemark?: string
   stockDeducted: boolean
   stockError: string
+  pickDocNo?: string
+  pickStatus?: string
   orderedAt?: string
   shippedAt?: string
   completedAt?: string

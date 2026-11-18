@@ -35,7 +35,7 @@ func (h *SelfOrderHandler) listFilterFromQuery(c *gin.Context) repo.SelfOrderLis
 		Status: c.Query("status"), Statuses: splitCSV(c.Query("statuses")),
 		ExcludeStatuses: splitCSV(c.Query("excludeStatuses")),
 		PayStatuses:     splitCSV(c.Query("payStatus")),
-		RefSoID: refSoID, Keyword: c.Query("keyword"),
+		RefSoID:         refSoID, Keyword: c.Query("keyword"),
 		ShipStatus:     c.Query("shipStatus"),
 		CreatedAtStart: parsePOCreatedAtStart(c.Query("createdAtStart")),
 		CreatedAtEnd:   parseDateTimeInclusiveEnd(c.Query("createdAtEnd")),
@@ -114,7 +114,7 @@ func (h *SelfOrderHandler) BindInvSku(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	item, err := h.ps(c).BindInvSku(itemID, &in)
+	item, err := h.ps(c).BindInvSku(c.Request.Context(), authcontext.BearerToken(c), itemID, &in)
 	if errors.Is(err, service.ErrNotFound) {
 		response.Fail(c, http.StatusNotFound, "明细不存在")
 		return
@@ -634,7 +634,6 @@ func parseDateTimeInclusiveEnd(s string) *time.Time {
 	}
 	return nil
 }
-
 
 func firstNonEmptyQuery(c *gin.Context, keys ...string) string {
 	for _, k := range keys {

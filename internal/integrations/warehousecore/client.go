@@ -335,6 +335,78 @@ func (c *Client) PostPurchaseInbound(ctx context.Context, bearerToken string, in
 	return nil
 }
 
+type SelfPickLine struct {
+	InvSkuID    uint64  `json:"invSkuId"`
+	SkuCode     string  `json:"skuCode"`
+	ProductName string  `json:"productName"`
+	Qty         float64 `json:"qty"`
+}
+
+type SelfPickRequest struct {
+	WarehouseID uint64         `json:"warehouseId"`
+	SoNo        string         `json:"soNo"`
+	Buyer       string         `json:"buyer"`
+	Address     string         `json:"address"`
+	Unbound     int            `json:"unbound"`
+	Lines       []SelfPickLine `json:"lines"`
+}
+
+type SelfPickAck struct {
+	DocNo       string `json:"docNo"`
+	Status      string `json:"status"`
+	BlockReason string `json:"blockReason"`
+}
+
+func (c *Client) EnsureSelfPick(ctx context.Context, bearerToken string, in *SelfPickRequest) (*SelfPickAck, error) {
+	if in == nil {
+		return nil, fmt.Errorf("request required")
+	}
+	payload, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	reqURL := c.baseURL + "/api/v1/admin/picks/from-self"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if auth := withBearer(bearerToken); auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("warehousecore request: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("warehousecore http %d: %s", resp.StatusCode, truncate(string(raw), 200))
+	}
+	var wrapped apiBody
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, fmt.Errorf("warehousecore decode: %w", err)
+	}
+	if wrapped.Code != 200 && wrapped.Code != 201 {
+		msg := wrapped.Message
+		if msg == "" {
+			msg = "warehousecore error"
+		}
+		return nil, fmt.Errorf("%s", msg)
+	}
+	if len(wrapped.Data) == 0 || string(wrapped.Data) == "null" {
+		return nil, nil
+	}
+	var ack SelfPickAck
+	if err := json.Unmarshal(wrapped.Data, &ack); err != nil {
+		return nil, fmt.Errorf("warehousecore pick decode: %w", err)
+	}
+	return &ack, nil
+}
+
 func (c *Client) PostSaleOutbound(ctx context.Context, bearerToken string, in *SaleOutboundRequest) error {
 	if in == nil {
 		return fmt.Errorf("request required")

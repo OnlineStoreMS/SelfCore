@@ -111,6 +111,17 @@ const canEditCost = computed(() => {
 })
 /** 电商订单默认已付款，不展示付款 Tab / 标记付款 */
 const isEcommerce = computed(() => (order.value?.sourceChannel || '').toLowerCase() === 'kdzs')
+
+function pickStatusText(status?: string) {
+  const map: Record<string, string> = {
+    blocked: '待审核',
+    picking: '待拣货',
+    reviewing: '复核中',
+    packed: '待发货',
+    done: '已出库',
+  }
+  return map[status || ''] || status || ''
+}
 const showPaymentTab = computed(() => !!order.value && !isEcommerce.value)
 
 const costSaving = ref(false)
@@ -257,7 +268,8 @@ async function confirmBindSku(sku: WarehouseSku) {
       costUnitPrice: sku.lastPurchasePrice,
     })
     bindDialogVisible.value = false
-    ElMessage.success('已绑定库存 SKU')
+    const pickNo = order.value.pickDocNo
+    ElMessage.success(pickNo ? `已绑定库存 SKU，已生成拣货单 ${pickNo}` : '已绑定库存 SKU')
   } catch (e) {
     ElMessage.error((e as Error).message || '绑定失败')
   } finally {
@@ -363,6 +375,10 @@ async function confirmBindSku(sku: WarehouseSku) {
                 class="retry-btn"
                 @click="handleRetryStock"
               >重试</el-button>
+            </el-descriptions-item>
+            <el-descriptions-item label="拣货单">
+              <span v-if="order.pickDocNo">{{ order.pickDocNo }} · {{ pickStatusText(order.pickStatus) }}</span>
+              <span v-else>—</span>
             </el-descriptions-item>
             <el-descriptions-item label="销售单号">
               <el-link

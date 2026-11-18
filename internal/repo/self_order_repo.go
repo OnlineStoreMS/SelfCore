@@ -25,13 +25,13 @@ func (r *SelfOrderRepo) ForTenant(tenantID uint64) *SelfOrderRepo {
 }
 
 type SelfOrderListFilter struct {
-	Status         string
-	Statuses       []string
+	Status          string
+	Statuses        []string
 	ExcludeStatuses []string
 	PayStatuses     []string
-	RefSoID        uint64
-	Keyword        string
-	ShipStatus     string // wait_ship | partial_shipped | shipped
+	RefSoID         uint64
+	Keyword         string
+	ShipStatus      string // wait_ship | partial_shipped | shipped
 	// CreatedAt* 按创建自营单时间（≈分配时间）筛选
 	CreatedAtStart *time.Time
 	CreatedAtEnd   *time.Time
@@ -377,6 +377,11 @@ func (r *SelfOrderRepo) Create(o *model.SelfOrder, items []model.SelfOrderItem) 
 
 func (r *SelfOrderRepo) Save(o *model.SelfOrder) error {
 	return r.db.Save(o).Error
+}
+
+func (r *SelfOrderRepo) SavePickRef(id uint64, docNo, status string) error {
+	return r.db.Model(&model.SelfOrder{}).Where("tenant_id = ? AND id = ?", r.tenantID, id).
+		Updates(map[string]interface{}{"pick_doc_no": docNo, "pick_status": status}).Error
 }
 
 func (r *SelfOrderRepo) SaveItem(it *model.SelfOrderItem) error {

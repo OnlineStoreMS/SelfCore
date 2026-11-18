@@ -62,7 +62,7 @@ func (s *SelfOrderService) List(f repo.SelfOrderListFilter) ([]dto.SelfOrderList
 			BuyerName: o.BuyerName, BuyerPhone: o.BuyerPhone,
 			SourceChannel: o.SourceChannel, Platform: o.Platform, ShopName: o.ShopName,
 			ManualSourceName: o.ManualSourceName,
-			BuyerRemark: o.BuyerRemark, SellerRemark: o.SellerRemark,
+			BuyerRemark:      o.BuyerRemark, SellerRemark: o.SellerRemark,
 			FenFaRemark: o.FenFaRemark, PrinterRemark: o.PrinterRemark,
 			StockDeducted: o.StockDeducted, StockError: o.StockError,
 			CreatedAt: formatTime(o.CreatedAt),
@@ -190,19 +190,19 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 		o := &model.SelfOrder{
 			SoNo: soNo, Status: status,
 			WarehouseID: warehouseID,
-			RefSoID: in.RefSoID, RefTraceID: strings.TrimSpace(in.RefTraceID),
+			RefSoID:     in.RefSoID, RefTraceID: strings.TrimSpace(in.RefTraceID),
 			SaleAmount: round2(saleTotal), CostAmount: round2(costTotal),
 			PayStatus: payStatus, PaidAt: paidAt,
 			BuyerName: in.BuyerName, BuyerPhone: in.BuyerPhone, Address: in.Address,
-			Remark: in.Remark,
-			SourceChannel: strings.TrimSpace(in.SourceChannel),
-			Platform:      strings.TrimSpace(in.Platform),
-			ShopName:      strings.TrimSpace(in.ShopName),
+			Remark:           in.Remark,
+			SourceChannel:    strings.TrimSpace(in.SourceChannel),
+			Platform:         strings.TrimSpace(in.Platform),
+			ShopName:         strings.TrimSpace(in.ShopName),
 			ManualSourceName: strings.TrimSpace(in.ManualSourceName),
-			BuyerRemark:   strings.TrimSpace(in.BuyerRemark),
-			SellerRemark:  strings.TrimSpace(in.SellerRemark),
-			FenFaRemark:   strings.TrimSpace(in.FenFaRemark),
-			PrinterRemark: strings.TrimSpace(in.PrinterRemark),
+			BuyerRemark:      strings.TrimSpace(in.BuyerRemark),
+			SellerRemark:     strings.TrimSpace(in.SellerRemark),
+			FenFaRemark:      strings.TrimSpace(in.FenFaRemark),
+			PrinterRemark:    strings.TrimSpace(in.PrinterRemark),
 		}
 		if o.ShopName == "" && o.ManualSourceName != "" {
 			o.ShopName = o.ManualSourceName
@@ -234,7 +234,12 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 			}
 			return nil, err
 		}
-		return s.Get(o.ID)
+		detail, err := s.Get(o.ID)
+		if err != nil {
+			return nil, err
+		}
+		_ = s.syncSelfPick(ctx, bearerToken, detail)
+		return detail, nil
 	}
 	if lastErr != nil {
 		return nil, lastErr
@@ -242,7 +247,7 @@ func (s *SelfOrderService) Create(ctx context.Context, bearerToken string, in *d
 	return nil, errors.New("创建自营单失败：单号冲突")
 }
 
-func (s *SelfOrderService) BindInvSku(itemID uint64, in *dto.BindInvSkuInput) (*dto.SelfOrderDetail, error) {
+func (s *SelfOrderService) BindInvSku(ctx context.Context, bearerToken string, itemID uint64, in *dto.BindInvSkuInput) (*dto.SelfOrderDetail, error) {
 	r := s.repos.SelfOrder.ForTenant(s.tenantID)
 	it, err := r.GetItem(itemID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -267,7 +272,85 @@ func (s *SelfOrderService) BindInvSku(itemID uint64, in *dto.BindInvSkuInput) (*
 	if err := r.SaveItem(it); err != nil {
 		return nil, err
 	}
-	return s.recalcOrderCost(it.SelfOrderID)
+	detail, err := s.recalcOrderCost(it.SelfOrderID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.syncSelfPick(ctx, bearerToken, detail); err != nil {
+		return detail, fmt.Errorf("库存 SKU 已保存，拣货单创建失败：%s", err.Error())
+	}
+	return detail, nil
+}
+
+func (s *SelfOrderService) syncSelfPick(ctx context.Context, bearerToken string, detail *dto.SelfOrderDetail) error {
+	if detail == nil || s.wh == nil || !s.wh.Enabled() || !selfOrderWaitsShip(detail.Status) {
+		return nil
+	}
+	req := &warehousecore.SelfPickRequest{
+		WarehouseID: detail.WarehouseID,
+		SoNo:        detail.SoNo,
+		Buyer:       detail.BuyerName,
+		Address:     detail.Address,
+	}
+	for _, it := range detail.Items {
+		if !shippableDetailItem(detail, it) {
+			continue
+		}
+		if it.InvSkuID == 0 {
+			req.Unbound++
+			continue
+		}
+		code := strings.TrimSpace(it.InvSkuCode)
+		if code == "" {
+			code = it.SkuCode
+		}
+		req.Lines = append(req.Lines, warehousecore.SelfPickLine{
+			InvSkuID: it.InvSkuID, SkuCode: code, ProductName: it.ProductName, Qty: float64(it.Qty),
+		})
+	}
+	if len(req.Lines) == 0 {
+		return nil
+	}
+	ack, err := s.wh.EnsureSelfPick(ctx, bearerToken, req)
+	if err != nil {
+		return err
+	}
+	if ack == nil || ack.DocNo == "" {
+		return nil
+	}
+	detail.PickDocNo = ack.DocNo
+	detail.PickStatus = ack.Status
+	return s.repos.SelfOrder.ForTenant(s.tenantID).SavePickRef(detail.ID, ack.DocNo, ack.Status)
+}
+
+func selfOrderWaitsShip(status string) bool {
+	switch strings.TrimSpace(status) {
+	case model.SelfOrderStatusDraft, model.SelfOrderStatusOrdered, model.SelfOrderStatusPaid,
+		model.SelfOrderStatusConfirmed, model.SelfOrderStatusPartialShipped:
+		return true
+	default:
+		return false
+	}
+}
+
+func shippableDetailItem(detail *dto.SelfOrderDetail, it dto.SelfOrderItemDTO) bool {
+	if strings.TrimSpace(it.SplitKind) != "" {
+		return true
+	}
+	hasFull := false
+	parentHasPartial := false
+	for _, x := range detail.Items {
+		if x.SplitKind == model.SplitKindFull {
+			hasFull = true
+		}
+		if x.SplitKind == model.SplitKindPartial && x.ParentSelfOrderItemID == it.ID {
+			parentHasPartial = true
+		}
+	}
+	if hasFull || parentHasPartial {
+		return false
+	}
+	return true
 }
 
 func (s *SelfOrderService) UpdateItemCost(itemID uint64, in *dto.UpdateItemCostInput) (*dto.SelfOrderDetail, error) {
@@ -2132,7 +2215,7 @@ func (s *SelfOrderService) toShipmentDTO(sh *model.SelfShipment) dto.SelfShipmen
 		ReceiverName: sh.ReceiverName, ReceiverPhone: sh.ReceiverPhone,
 		ReceiverAddress: sh.ReceiverAddress, Remark: sh.Remark,
 		CreatedAt: formatTime(sh.CreatedAt),
-		Items: make([]dto.SelfShipmentItemDTO, 0, len(sh.Items)),
+		Items:     make([]dto.SelfShipmentItemDTO, 0, len(sh.Items)),
 	}
 	if sh.ShippedAt != nil {
 		d.ShippedAt = formatTimePtr(sh.ShippedAt)
@@ -2174,12 +2257,13 @@ func (s *SelfOrderService) toDetail(o *model.SelfOrder) *dto.SelfOrderDetail {
 		SaleAmount: o.SaleAmount, CostAmount: o.CostAmount,
 		PayStatus: firstNonEmpty(o.PayStatus, model.DistPayStatusUnpaid),
 		BuyerName: o.BuyerName, BuyerPhone: o.BuyerPhone, Address: o.Address,
-		Remark: o.Remark,
+		Remark:        o.Remark,
 		SourceChannel: o.SourceChannel, Platform: o.Platform, ShopName: o.ShopName,
 		ManualSourceName: o.ManualSourceName,
-		BuyerRemark: o.BuyerRemark, SellerRemark: o.SellerRemark,
+		BuyerRemark:      o.BuyerRemark, SellerRemark: o.SellerRemark,
 		FenFaRemark: o.FenFaRemark, PrinterRemark: o.PrinterRemark,
 		StockDeducted: o.StockDeducted, StockError: o.StockError,
+		PickDocNo: o.PickDocNo, PickStatus: o.PickStatus,
 		CreatedAt: formatTime(o.CreatedAt), UpdatedAt: formatTime(o.UpdatedAt),
 	}
 	if o.PaidAt != nil {
