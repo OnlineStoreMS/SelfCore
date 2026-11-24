@@ -827,8 +827,9 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 				}
 				continue
 			}
-			// 无销售行明细映射时：仅首运单挂剩余可发数量（兼容历史）
-			if len(remainInputs) == 0 && li == 0 {
+			// 无销售行明细映射：仅「无运单商品行」的首运单可挂剩余自营数量（兼容历史整单发货）。
+			// 运单已挂销售行但映射不到本自营单 → 代发/其他包裹，绝不能落自营附加运单。
+			if len(remainInputs) == 0 && li == 0 && len(entry.orderItems) == 0 {
 				for _, it := range g.items {
 					if it.ID == 0 {
 						continue
@@ -841,38 +842,6 @@ func (s *SelfOrderService) SyncShipmentsFromOrders(ctx context.Context, selfOrde
 						SelfOrderItemID: it.ID, Qty: remain,
 					})
 				}
-			}
-			if len(remainInputs) == 0 && li > 0 {
-				// 附加运单无商品明细也落一条记录，便于对账
-				no, nerr := r.NextShipmentNo()
-				if nerr != nil {
-					out.Errors = append(out.Errors, fmt.Sprintf("%s: %v", order.OrderNo, nerr))
-					continue
-				}
-				now := time.Now()
-				shippedAt := &now
-				if entry.shippedAt != nil {
-					shippedAt = entry.shippedAt
-				}
-				esh := &model.SelfShipment{
-					SelfOrderID:     selfOrderID,
-					ShipmentNo:      no,
-					Status:          model.ShipmentStatusShipped,
-					CarrierName:     entry.carrier,
-					TrackingNo:      entry.trackingNo,
-					ShippedAt:       shippedAt,
-					ReceiverName:    receiverName,
-					ReceiverPhone:   receiverPhone,
-					ReceiverAddress: receiverAddr,
-					CallbackOK:      true,
-					Remark:          entry.remark + "（附加运单）",
-				}
-				if err := r.CreateShipment(esh, nil); err != nil {
-					out.Errors = append(out.Errors, fmt.Sprintf("%s extra: %v", order.OrderNo, err))
-					continue
-				}
-				out.Created++
-				continue
 			}
 			if len(remainInputs) == 0 {
 				out.Skipped++
